@@ -1,0 +1,36 @@
+{
+	"name": "Ubuntu",
+	"build": {
+		"dockerfile": "Dockerfile",
+		"args": { "VARIANT": "nobal" },
+		"context": ".."
+	},
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"rust-lang.rust-analyzer",
+				"tamasfe.even-better-toml",
+				"llvm-vs-code-extensions.vscode-clangd",
+				"Gruntfuggly.todo-tree",
+				"alefragnani.Bookmarks",
+				"vadimcn.vscode-lldb",
+				"donjayamanne.python-extension-pack",
+				"MatthewNespor.vscode-color-identifiers-mode",
+				"oderwat.indent-rainbow",
+				"ms-azuretools.vscode-docker",
+				"zeshuaro.vscode-python-poetry",
+				"jnoortheen.xonsh"
+			],
+			"settings": {
+				"rust-analyzer.server.path": "/home/ubuntu/.cargo/bin/rust-analyzer",
+				"clangd.path": "/usr/bin/clangd",
+				"python.defaultInterpreterPath": "./.venv/bin/python",
+				"python.terminal.activateEnvInCurrentTerminal": true
+			}
+		}
+	},
+	"remoteUser": "ubuntu",
+	"containerUser": "ubuntu",
+	"updateRemoteUserUID": true,
+	"postStartCommand": "poetry install -q"
+}
