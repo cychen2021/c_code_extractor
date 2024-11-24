@@ -44,4 +44,5 @@ RUN (type -p wget >/dev/null || (sudo apt update && sudo apt-get install wget -y
 	&& echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
 	&& sudo apt-get update \
 	&& sudo apt-get install gh -y
-RUN sudo apt-get install -y git-lfs vim python3-pylsp bear
+RUN sudo apt-get install -y git-lfs vim python3-pylsp
+RUN sudo apt-get install -y bear
