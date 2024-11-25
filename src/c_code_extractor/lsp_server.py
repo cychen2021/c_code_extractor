@@ -102,7 +102,10 @@ class LSPServer:
         self.stop()
         
     def initialize_lsp_server(self):
-        r = self.request("initialize", {"processId": os.getpid()})
+        r = self.request("initialize", {
+            'processId': os.getpid(),
+            'rootUri': _path_to_uri(self.cwd),
+        })
         self.notify("initialized", {})
     
     def get_and_inc_sequence(self):
@@ -165,8 +168,25 @@ class LSPServer:
         return self.request("textDocument/definition", {
             "textDocument": {"uri": _path_to_uri(file_name)},
             "position": {
-                "line": line - 1,
-                "character": character - 1,
+                "line": line,
+                "character": character,
+            }
+        })
+
+    def request_type_definition(self, file_name, line, character):
+        return self.request("textDocument/typeDefinition", {
+            "textDocument": {"uri": _path_to_uri(file_name)},
+            "position": {
+                "line": line,
+                "character": character,
+            }
+        })
+    def request_declaration(self, file_name, line, character):
+        return self.request("textDocument/declaration", {
+            "textDocument": {"uri": _path_to_uri(file_name)},
+            "position": {
+                "line": line,
+                "character": character,
             }
         })
 
@@ -174,8 +194,8 @@ class LSPServer:
         return self.request("textDocument/references", {
             "textDocument": {"uri": _path_to_uri(file_name)},
             "position": {
-                "line": line - 1,
-                "character": character - 1,
+                "line": line,
+                "character": character,
             },
             "context": {
                 "includeDeclaration": True
@@ -186,8 +206,8 @@ class LSPServer:
         return self.request("textDocument/typeDefinition", {
             "textDocument": {"uri": _path_to_uri(file_name)},
             "position": {
-                "line": line - 1,
-                "character": character - 1,
+                "line": line,
+                "character": character,
             }
         })
 
