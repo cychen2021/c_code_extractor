@@ -2,11 +2,20 @@ from typing import Literal
 
 class CodeItem:
     def __init__(self, kind: Literal['typedef', 'funcdef', 'vardef', 'macrodef'], name: str, file: str, start_point: tuple[int, int], end_point: tuple[int, int]):
-        self.kind = kind
+        self.kind: Literal['typedef', 'funcdef', 'vardef', 'macrodef'] = kind
         self.name = name
         self.file = file
         self.start_point = start_point
         self.end_point = end_point
+    
+    def toJson(self) -> dict:
+        return {
+            'kind': self.kind,
+            'name': self.name,
+            'file': self.file,
+            'start_point': self.start_point,
+            'end_point': self.end_point
+        }
         
     def __repr__(self) -> str:
         return f'{self.kind} {self.name} in {self.file} [({self.start_point[0]}, {self.start_point[1]}) - ({self.end_point[0]}, {self.end_point[1]})]'

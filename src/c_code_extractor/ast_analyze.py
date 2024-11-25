@@ -23,6 +23,31 @@ def is_within(range_inner: tuple[Point, Point], range_outer: tuple[Point, Point]
     outer_start, outer_end = range_outer
     return point_le(outer_start, inner_start) and point_le(inner_end, outer_end)
 
+def get_all_funcs(file_path: str) -> list[CodeItem]:
+    parser = Parser(C_LANG)
+    with open(file_path, 'r') as f:
+        content = f.read()
+    ast = parser.parse(content.encode())
+    query = C_LANG.query(
+        r'''(function_definition 
+            declarator: (function_declarator
+                declarator: (identifier) @func_name
+            )
+        ) @func'''
+    )
+    matches = query.matches(ast.root_node)
+    result = []
+    for m in matches:
+        nodes = m[1]['func']
+        assert len(nodes) == 1
+        n = nodes[0]
+        func_names = m[1]['func_name']
+        assert len(func_names) == 1
+        name = func_names[0].text.decode() # type: ignore
+        result.append(CodeItem('funcdef', name, file_path, 
+                                (n.start_point.row, n.start_point.column), 
+                                (n.end_point.row, n.end_point.column)))
+    return result
 
 def get_ast_of_func(file_path: str, start_point: Point, end_point: Point) -> Node | None:
     parser = Parser(C_LANG)
