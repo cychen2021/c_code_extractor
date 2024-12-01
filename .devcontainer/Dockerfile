@@ -46,3 +46,4 @@ RUN (type -p wget >/dev/null || (sudo apt update && sudo apt-get install wget -y
 	&& sudo apt-get install gh -y
 RUN sudo apt-get install -y git-lfs vim python3-pylsp
 RUN sudo apt-get install -y bear
+RUN sudo pip install compdb

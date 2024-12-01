@@ -11,6 +11,8 @@ LINE_NUM_THREASHOLD=100
 @click.option('--src', '-i', type=click.Path(exists=True, dir_okay=True, file_okay=False), help='Path to the source file')
 @click.option('--output', '-o', type=click.Path(exists=False, dir_okay=False, file_okay=True), 
               help='Output file for the extracted code', default='callgraph.json')
+@click.option('--exclude-header/--include-header', '-e/-I', is_flag=True, 
+              help='Path to the file containing the list of header files to exclude', default=True)
 def main(src, output):
     all_files = []
     for p, ds, fs in os.walk(src):
@@ -27,7 +29,8 @@ def main(src, output):
             line_num = end_point[0] - start_point[0] + 1
             if line_num < LINE_NUM_THREASHOLD:
                 count += 1
-            relative_item = CodeItem(func.kind, func.name, func.file.removeprefix(src + '/'), (start_point[0], start_point[1]), (end_point[0], end_point[1]))
+            relative_item = CodeItem(func.kind, func.file.removeprefix(src + '/'), (start_point[0], start_point[1]), 
+                                     (end_point[0], end_point[1]), name=func.name)
             results.append(relative_item.toJson())
     print(f'{count}/{len(results)}')
     with open(output, 'w') as f:

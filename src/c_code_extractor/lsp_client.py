@@ -15,7 +15,7 @@ class ClangD:
             self.compilation_commands = json.load(f)
         self.src = src
         for command in self.compilation_commands:
-            file_path = command['file'].removeprefix(os.path.abspath(src) + '/')
+            file_path = command['file']
             
             self.lsp_server.notify_open(file_path, 'c')
     
@@ -51,7 +51,7 @@ class ClangD:
                     if symbol['name'] == name:
                         start_point = symbol['location']['range']['start']['line'], symbol['location']['range']['start']['character']
                         end_point = symbol['location']['range']['end']['line'], symbol['location']['range']['end']['character']
-                        result = CodeItem('funcdef', name, os.path.join(self.lsp_server.cwd, file) , start_point, end_point)
+                        result = CodeItem('funcdef', os.path.join(self.lsp_server.cwd, file) , start_point, end_point, name=name)
                 case _: pass
             
         return result
@@ -59,4 +59,5 @@ class ClangD:
     # XXX: Clangd's goto definition only gives the header of the definition
     def get_definition(self, file: str, line: int, character: int):
         response = self.lsp_server.request_definition(file, line, character)
+        assert 'result' in response, f'{response=}, {file=}, {line=}, {character=}'
         return response['result']
