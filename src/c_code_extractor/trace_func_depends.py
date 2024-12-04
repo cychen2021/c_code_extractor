@@ -59,13 +59,15 @@ def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) 
 
     count = 0
     root_item = CodeItem('funcdef', file, (start_point[0], start_point[1]), (ast.end_point.row, ast.end_point.column), name=func_name)
+    visited = set()
+
     work_list = [(root_item, ast)]
     while work_list:
         item, current = work_list.pop()
         
-        if item in parents:
+        if item in visited:
             continue
-        parents[item] = []
+        visited.add(item)
 
         count += 1
         if item != root_item:
@@ -88,9 +90,9 @@ def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) 
             if not def_file_dir.startswith(PROJECT_ROOT):
                 code_item = CodeItem('include_file', def_file)
                 if code_item not in parents:
-                    parents[code_item] = []
+                    parents[code_item] = set()
                     
-                parents[code_item].append(item)
+                parents[code_item].add(item)
                 include_collect.add(code_item)
                 continue
             
@@ -102,19 +104,20 @@ def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) 
                 warnings.add(warning)
                 continue
             if code_item.kind == 'funcdef':
-                if code_item not in parents:
-                    parents[code_item] = []
+                if code_item != root_item and code_item not in parents:
+                    parents[code_item] = set()
                 if code_item != root_item:
-                    parents[code_item].append(item)
+                    parents[code_item].add(item)
                     func_collect.add(code_item)
             else:
                 ast = get_ast_exact_match(def_file, code_item.start_point, code_item.end_point)
                 assert ast is not None
                 if code_item not in parents:
-                    parents[code_item] = []
-                parents[code_item].append(item)
+                    parents[code_item] = set()
+                parents[code_item].add(item)
                 work_list.append((code_item, ast))
-    assert not parents[root_item]
+    assert root_item not in parents
+    parents[root_item] = set()
     for item, the_parents in parents.items():
         if item != root_item:
             assert the_parents

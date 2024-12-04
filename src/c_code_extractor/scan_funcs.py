@@ -32,7 +32,7 @@ def main(src, output):
             relative_item = CodeItem(func.kind, func.file.removeprefix(src + '/'), (start_point[0], start_point[1]), 
                                      (end_point[0], end_point[1]), name=func.name)
             results.append(relative_item.toJson())
-    print(f'{count}/{len(results)}')
+    print(f'{count}/{len(results)} < {LINE_NUM_THREASHOLD} lines')
     with open(output, 'w') as f:
         f.write(json.dumps(results, indent=2))
 

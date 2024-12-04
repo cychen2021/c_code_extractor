@@ -175,3 +175,4 @@ cython_debug/
 *.vsix
 
 playground/
+collected/*_gadgets/
