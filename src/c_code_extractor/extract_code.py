@@ -82,13 +82,14 @@ def main(src, output, function_depends_file):
                 case 'include':
                     assert isinstance(item.item, str)
                     includes.add(f'#include "{item.item}"')
+                    continue
                 case 'func':
                     assert isinstance(item.item, CodeLocation)
                     func_def_ast = get_ast_exact_match(item.item.file, item.item.start_point, item.item.end_point)
                     assert func_def_ast is not None
-                    content = 'extern' + get_func_header_from_def(func_def_ast) + ';'
+                    content = 'extern ' + get_func_header_from_def(func_def_ast) + ';'
             contents.append(content)
-        contents = ['\n'.join(includes)] + contents
+        contents.insert(0, '\n'.join(includes))
         with open(os.path.join(output, func_name, f'{func_name}.c'), 'w') as f:
             f.write('\n\n'.join(contents))
 
