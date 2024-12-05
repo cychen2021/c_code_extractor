@@ -47,3 +47,4 @@ RUN (type -p wget >/dev/null || (sudo apt update && sudo apt-get install wget -y
 RUN sudo apt-get install -y git-lfs vim python3-pylsp
 RUN sudo apt-get install -y bear
 RUN pipx install compdb
+RUN echo "source .venv/bin/activate" >> "/home/ubuntu/.bashrc"
