@@ -2,6 +2,8 @@ from lsp_server import LSPServer
 from code_item import CodeItem
 import os.path
 import json
+from typing import Any
+from ast_analyze import Point
 
 class ClangD:
     def __init__(self, src, build) -> None:
@@ -18,6 +20,8 @@ class ClangD:
             file_path = command['file']
             
             self.lsp_server.notify_open(file_path, 'c')
+
+        self.semantic_tokens_mapping: dict[str, dict[tuple[int, int], dict[str, Any]]] = {}
     
     def __del__(self) -> None:
         for command in self.compilation_commands:
@@ -39,7 +43,23 @@ class ClangD:
                 return 'enum'
             case _:
                 assert False, f'Unknown kind: {kind}'
+    def get_semantic_tokens_in_file(self, file: str) -> dict[tuple[int, int], dict[str, Any]]:
+        if file not in self.semantic_tokens_mapping:
+            response = self.lsp_server.request_semantic_tokens(file)['result']
+            mapping = self.lsp_server.compute_semantic_token_mapping(response['data'])
+            self.semantic_tokens_mapping[file] = mapping
+        return self.semantic_tokens_mapping[file]
 
+    def get_semantic_tokens_in_range(self, file: str, start_point: Point, end_point: Point) -> dict[tuple[int, int], dict[str, Any]]:
+        tokens = self.get_semantic_tokens_in_file(file)
+        result = {}
+        for key, value in tokens.items():
+            if start_point[0] <= key[0] <= end_point[0] and start_point[1] <= key[1] <= end_point[1]:
+                result[key] = value
+        return result 
+        
+    def get_semantic_token(self, file: str, start_point: Point) -> dict[str, Any] | None:
+        return self.get_semantic_tokens_in_file(file).get((start_point[0], start_point[1]), None)
 
     def get_function_by_name(self, name: str, file: str):
         response = self.lsp_server.request_all_symbols(file)['result']
@@ -61,3 +81,12 @@ class ClangD:
         response = self.lsp_server.request_definition(file, line, character)
         assert 'result' in response, f'{response=}, {file=}, {line=}, {character=}'
         return response['result']
+
+    def get_macro_expansion(self, file: str, start_point: Point, end_point: Point):
+        response = self.lsp_server.request_ast(file, start_point, end_point)
+        # response = self.lsp_server.request_hover(file, line, character)
+        return response
+
+    def refresh_file_content(self, file: str, content: str):
+        self.lsp_server.notify_change(file, content)
+        self.semantic_tokens_mapping.pop(file)

@@ -67,7 +67,27 @@ def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) 
         
         if item in visited or item != root_item and is_within((item.start_point, item.end_point), (root_item.start_point, root_item.end_point)):
             continue
+        
+        old_content = None
+        item_semantic_token = clangd.get_semantic_token(item.file, item.start_point)
+        # assert item_semantic_token is not None, f'{item=}'
+        if item_semantic_token is not None and item_semantic_token['type'] == 'comment':
+            with open(item.file, 'r') as f:
+                _old_content = f.read()
+            to_cancel = cancel_macro(_old_content, item.start_point, item.end_point)
+            if to_cancel is not None:
+                old_content = _old_content
+                mask, to_erase = to_cancel
+                lines = old_content.split('\n')
+                for row in range(to_erase[0][0], to_erase[1][0] + 1):
+                    for column in range(0 if row != to_erase[0][0] else to_erase[0][1], 
+                                        len(lines[row]) if row != to_erase[1][0] else to_erase[1][1]):
+                        if not point_is_within((row, column), mask):
+                            lines[row] = lines[row][:column] + ' ' + lines[row][column+1:]
+                new_content = '\n'.join(lines)
+                clangd.refresh_file_content(item.file, new_content)
 
+        
         if len(other_collect) + len(func_collect) + len(include_collect) > MAX_NUM:
             warning = f'Warning: Too many items: {len(other_collect) + len(func_collect) + len(include_collect)}'
             print(warning)
@@ -79,11 +99,35 @@ def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) 
         if item != root_item:
             other_collect.add(item)
 
-        normal_identifiers = collect_identifiers(current)
-        ty_identifiers = collect_types(current)
-        identifiers = normal_identifiers + ty_identifiers
+        tokens = collect_type_and_identifiers(current)
+        macros = []
+        for token in tokens:
+            semantic_token = clangd.get_semantic_token(item.file, token[1])
+            if semantic_token is None:
+                continue
+            kind = semantic_token['type']
+            if kind == 'macro':
+                macros.append(token)
+        if old_content is not None:
+            clangd.refresh_file_content(item.file, old_content)
         
-        for id_name, start_point, end_point in identifiers:
+        within_macros = set()
+        for macro in macros:
+            range_ = get_macro_expanding_range(current, macro[1], macro[2])
+            within_macros.add(range_)
+        print(f'{item.file=} {item.start_point=} {item.end_point=} {len(macros)=}')
+        
+
+        def within_macro(start_point, end_point) -> bool:
+            for range_ in within_macros:
+                if is_within((start_point, end_point), range_):
+                    return True
+            return False
+        
+        for id_name, start_point, end_point in tokens:
+            if not within_macro(start_point, end_point):
+                continue
+            
             defs = clangd.get_definition(item.file, start_point[0], start_point[1])
             if len(defs) == 0:
                 continue
@@ -124,6 +168,13 @@ def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) 
                     parents[code_item] = set()
                 parents[code_item].add(item)
                 work_list.append((code_item, ast))
+        
+        for start_point, end_point in within_macros:
+            response = clangd.get_macro_expansion(item.file, start_point, end_point)
+            # print(f'{response=} {macro_name=} {start_point=} {end_point=}')
+            print(f'{start_point=} {end_point=}')
+            print(f'{response=}')
+        
     assert root_item not in parents
     parents[root_item] = set()
     for item, the_parents in parents.items():
@@ -165,7 +216,7 @@ BATCH_SIZE = 10
               help='Output file for the extracted code', default='func_depends_%r.jsonl')
 @click.option('--start-batch', '-s', type=int, default=-1, help='Start batch')
 @click.option('--end-batch', '-e', type=int, default=-1, help='End batch')
-@click.option('--split/--no-split', '-p/-m', is_flag=True, help='Split the output file', default=True)
+@click.option('--split/--no-split', '-p/-m', help='Split the output file')
 def main(src, func_list, output, start_batch, end_batch, split):
     all_func_list = json.load(open(func_list, 'r'))
 
@@ -187,6 +238,8 @@ def main(src, func_list, output, start_batch, end_batch, split):
             func_list.extend(batches[i])
         with open(output.replace('%r', f'{start_batch}_{end_batch}'), 'w') as f:
             for func in tqdm(func_list):
+                if func['name'] != 'ABRThandler':
+                    continue
                 func_depends, include_depends, other_depends, warnings = extract_func(clangd, os.path.join(src, func['file']), func['start_point'], func['name'])
                 item = {
                     'func': func,
@@ -197,6 +250,7 @@ def main(src, func_list, output, start_batch, end_batch, split):
                 }
                 f.write(json.dumps(item) + '\n')
                 del item, func_depends, include_depends, other_depends, warnings
+                assert False
     else:
         # The code causes memory leak. Use a process to release the memory.
         with ProcessPoolExecutor(max_workers=1, max_tasks_per_child=1) as executor:

@@ -2,6 +2,7 @@ from tree_sitter import Parser, Language, Node
 import tree_sitter_c as tsc
 from code_item import CodeItem
 from functools import cmp_to_key
+from typing import Sequence
 
 Point = tuple[int, int]
 C_LANG = Language(tsc.language())
@@ -25,6 +26,9 @@ def point_cmp(p1: Point, p2: Point) -> int:
     if point_eq(p1, p2):
         return 0
     return 1
+
+def point_is_within(p: Point, range_: tuple[Point, Point]) -> bool:
+    return point_le(range_[0], p) and point_le(p, range_[1])
 
 def is_within(range_inner: tuple[Point, Point], range_outer: tuple[Point, Point]) -> bool:
     inner_start, inner_end = range_inner
@@ -263,6 +267,9 @@ def collect_types(node: Node) -> list[tuple[str, Point, Point]]:
                            (n.end_point.row, n.end_point.column)))
     return result
 
+def collect_type_and_identifiers(node: Node) -> list[tuple[str, Point, Point]]:
+    return collect_types(node) + collect_identifiers(node)
+
 def collect_identifiers(node: Node) -> list[tuple[str, Point, Point]]:
     query = C_LANG.query(
         r'[(identifier) (null)]@id'
@@ -296,3 +303,116 @@ def collect_declaration_identifiers(node: Node) -> list[tuple[str, Point, Point]
                            (n.start_point.row, n.start_point.column), 
                            (n.end_point.row, n.end_point.column)))
     return list(result)
+
+def get_macro_expanding_range(ast: Node, start_point: Point, end_point: Point) -> tuple[Point, Point]:
+    def locate(predicate, args, pattern_index, captures):
+        match predicate:
+            case 'locate?':
+                item_node: Node = captures['macro'][0]
+                r = point_eq(start_point, (item_node.start_point.row, item_node.start_point.column)) \
+                    and point_eq(end_point, (item_node.end_point.row, item_node.end_point.column))
+                return r
+            case _:
+                return True
+    query1 = C_LANG.query(
+        r'((identifier) @macro @whole (#locate?))'
+    )
+    query2 = C_LANG.query(
+        r'((call_expression function: (identifier) @macro) @whole (#locate?))'
+    )
+    matches2 = query2.matches(ast, predicate=locate)
+    match_idices2 = set()
+    for idx, _ in matches2:
+        match_idices2.add(idx)
+    assert len(match_idices2) <= 1
+    if len(match_idices2) == 1:
+        for _, m in matches2:
+            if 'whole' in m:
+                whole = m['whole'][0]
+                break
+        return (whole.start_point.row, whole.start_point.column), (whole.end_point.row, whole.end_point.column)
+    matches1 = query1.matches(ast, predicate=locate)
+    match_idices1 = set()
+    for idx, _ in matches1:
+        match_idices1.add(idx)
+    assert len(match_idices1) == 1
+    for _, m in matches1:
+        if 'whole' in m:
+            whole = m['whole'][0]
+            break
+    return (whole.start_point.row, whole.start_point.column), (whole.end_point.row, whole.end_point.column)
+
+def cancel_macro(file_content: str, start_point: Point, end_point: Point):
+    parser = Parser(C_LANG)
+    ast = parser.parse(file_content.encode())
+    return cancel_macro_in_ast(ast.root_node, start_point, end_point)
+
+def cancel_macro_in_ast(ast: Node, start_point: Point, end_point: Point) -> tuple[tuple[Point, Point], tuple[Point, Point]] | None:
+    q2 = C_LANG.query(
+        r'((preproc_ifdef name: (_) . (_)* @enclosed . alternative: (preproc_else (_)*) .) @macro (#locate?))'
+    )
+    q2_prime = C_LANG.query(
+        r'((preproc_if condition: (_) . (_)* . alternative: (preproc_else (_)* @enclosed) .) @macro (#locate?))'
+    )
+    q3 = C_LANG.query(
+        r'((preproc_ifdef name: (_) . (_)* . alternative: (preproc_else (_)* @enclosed) .) @macro (#locate?))'
+    )
+    q3_prime = C_LANG.query(
+        r'((preproc_if condition: (_) . (_)* @enclosed . alternative: (preproc_else (_)*) .) @macro (#locate?))'
+    )
+
+    # Tree-sitter has a bug. An anchor at the end of the pattern causes missing matches.
+    q1 = C_LANG.query(
+        r'((preproc_ifdef name: (_) . (_)* @enclosed) @macro (#locate?))'
+    )
+    q1_prime = C_LANG.query(
+        r'((preproc_if condition: (_) . (_)* @enclosed) @macro (#locate?))'
+    )
+    
+    def get_range(nodes: list[Node]) -> tuple[Point, Point]:
+        start_point = (-1, -1)
+        end_point = (-1, -1)
+        for node in nodes:
+            if start_point == (-1, -1) or point_lt((node.start_point.row, node.start_point.column), start_point):
+                start_point = (node.start_point.row, node.start_point.column)
+            if end_point == (-1, -1) or point_lt(end_point, (node.end_point.row, node.end_point.column)):
+                end_point = (node.end_point.row, node.end_point.column)
+        return (start_point, end_point)
+    def locate(predicate, args, pattern_index, captures):
+        match predicate:
+            case 'locate?':
+                item_node: list[Node] = captures['enclosed']
+                enclosed_range = get_range(item_node)
+                return is_within((start_point, end_point), enclosed_range)
+            case _:
+                return True
+    matches2 = q2.matches(ast, predicate=locate)
+    matches2_prime = q2_prime.matches(ast, predicate=locate)
+    matches3 = q3.matches(ast, predicate=locate)
+    matches3_prime = q3_prime.matches(ast, predicate=locate)
+    assert len(matches2) + len(matches2_prime) + len(matches3) + len(matches3_prime) <= 1
+    if len(matches2) == 1:
+        the_matches = matches2
+    elif len(matches2_prime) == 1:
+        the_matches = matches2_prime
+    elif len(matches3) == 1:
+        the_matches = matches3
+    elif len(matches3_prime) == 1:
+        the_matches = matches3_prime
+    else:
+        matches1 = q1.matches(ast, predicate=locate)
+        matches1_prime = q1_prime.matches(ast, predicate=locate)
+        assert len(matches1) + len(matches1_prime) <= 1
+        if len(matches1) == 1:
+            the_matches = matches1
+        elif len(matches1_prime) == 1:
+            the_matches = matches1_prime
+        else:
+            return None
+    
+    enclosed_nodes = the_matches[0][1]['enclosed']
+    enclosed_range = get_range(enclosed_nodes)
+    
+    macro_node = the_matches[0][1]['macro'][0]
+    macro_range = (macro_node.start_point, macro_node.end_point)
+    return enclosed_range, macro_range

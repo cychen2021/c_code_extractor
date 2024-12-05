@@ -2,6 +2,7 @@ import subprocess
 import urllib.parse
 import os.path
 import json
+from typing import Any
 
 def _path_to_uri(path):
     return "file://" + os.path.abspath(path)
@@ -35,6 +36,10 @@ def check(executable):
         return False
     
 class LSPServer:
+    class InitResult:
+        def __init__(self, semantic_tokens_legend):
+            self.semantic_tokens_legend = semantic_tokens_legend
+    
     @staticmethod
     def _to_lsp_request(id, method, params):
         request = {"jsonrpc": "2.0", "id": id, "method": method}
@@ -85,6 +90,12 @@ class LSPServer:
         self.cwd = cwd
         self._process = None
         self._sequence = 0
+        self.semantic_tokens_legend = {
+            "tokenTypes": [],
+            "tokenModifiers": [],
+        }
+        self.file_version = {}
+        self.original_content = {}
         
     def __enter__(self):
         self.start()
@@ -101,18 +112,45 @@ class LSPServer:
     def __del__(self):
         self.stop()
         
-    def initialize_lsp_server(self):
+    def initialize_lsp_server(self) -> 'LSPServer.InitResult':
         r = self.request("initialize", {
             'processId': os.getpid(),
             'rootUri': _path_to_uri(self.cwd),
         })
+        capabilities = r['result']['capabilities']
+        semantic_tokens_legend = capabilities.get('semanticTokensProvider', {}).get('legend')
         self.notify("initialized", {})
+        return self.InitResult(semantic_tokens_legend)
     
     def get_and_inc_sequence(self):
         seq = self._sequence
         self._sequence += 1
         return seq
     
+    def request_hover(self, file_name, line, character):
+        return self.request("textDocument/hover", {
+            "textDocument": {"uri": _path_to_uri(file_name)},
+            "position": {
+                "line": line,
+                "character": character,
+            }
+        })
+    
+    def request_ast(self, file_name, start_point, end_point):
+        return self.request("textDocument/selectionRange", {
+            "textDocument": {"uri": _path_to_uri(file_name)},
+            "positions": [
+                {
+                    "line": start_point[0],
+                    "character": start_point[1],
+                },
+                {
+                    "line": end_point[0],
+                    "character": end_point[1],
+                }
+            ]
+        })
+        
     def start(self):
         import sys
         self._sequence = 0
@@ -124,7 +162,20 @@ class LSPServer:
             stderr=subprocess.DEVNULL,
             cwd=self.cwd,
         )
-        self.initialize_lsp_server()
+        r = self.initialize_lsp_server()
+        self.semantic_tokens_legend = r.semantic_tokens_legend
+    
+    def semantic_token_type_of(self, token_type_id: int):
+        return self.semantic_tokens_legend['tokenTypes'][token_type_id]
+    
+    def semantic_token_modifier_of(self, token_modifier_flags: int):
+        result = []
+        for i in range(token_modifier_flags.bit_length()):
+            mask = 1 << i
+            flat_set = token_modifier_flags & mask != 0
+            if flat_set:
+                result.append(self.semantic_tokens_legend['tokenModifiers'][i])
+        return result
 
     def stop(self):
         if self._process is None:
@@ -151,6 +202,7 @@ class LSPServer:
     def notify_open(self, filename, language_id):
         with open(os.path.join(self.cwd, filename), "r") as file:
             text = file.read()
+        self.file_version[filename] = 1
 
         self.notify("textDocument/didOpen", {
             "textDocument": {
@@ -163,6 +215,35 @@ class LSPServer:
     
     def notify_close(self, file_name):
         self.notify("textDocument/didClose", {"textDocument": {"uri": _path_to_uri(file_name)}})
+        
+    def compute_semantic_token_mapping(self, semantic_token_encoding) -> dict[tuple[int, int], dict[str, Any]]:
+        assert len(semantic_token_encoding) % 5 == 0, f'{len(semantic_token_encoding)=}'
+        previous_line = 0
+        previous_start = 0
+        tokens = {}
+        for i in range(0, len(semantic_token_encoding), 5):
+            delta_line = semantic_token_encoding[i]
+            delta_start = semantic_token_encoding[i+1]
+            length = semantic_token_encoding[i+2]
+            token_type = semantic_token_encoding[i+3]
+            token_modifiers = semantic_token_encoding[i+4]
+            
+            if delta_line != 0:
+                previous_start = 0
+            
+            line = previous_line + delta_line
+            start = previous_start + delta_start
+            item = {
+                'line': line,
+                'start': start,
+                'length': length,
+                'type': self.semantic_token_type_of(token_type),
+                'modifiers': self.semantic_token_modifier_of(token_modifiers),
+            }
+            tokens[(line, start)] = item
+            previous_line = line
+            previous_start = start
+        return tokens
 
     def request_definition(self, file_name, line, character):
         return self.request("textDocument/definition", {
@@ -181,6 +262,27 @@ class LSPServer:
                 "character": character,
             }
         })
+
+    def request_semantic_tokens_in_range(self, file_name, range, start_line, start_character, end_line, end_character):
+        return self.request("textDocument/semanticTokens/range", {
+            "textDocument": {"uri": _path_to_uri(file_name)},
+            "range": {
+                "start": {
+                    "line": start_line,
+                    "character": start_character,
+                },
+                "end": {
+                    "line": end_line,
+                    "character": end_character,
+                }
+            }
+        })
+    
+    def request_semantic_tokens(self, file_name):
+        return self.request("textDocument/semanticTokens/full", {
+            "textDocument": {"uri": _path_to_uri(file_name)}
+        })
+        
     def request_declaration(self, file_name, line, character):
         return self.request("textDocument/declaration", {
             "textDocument": {"uri": _path_to_uri(file_name)},
@@ -214,4 +316,17 @@ class LSPServer:
     def request_all_symbols(self, file_name):
         return self.request("textDocument/documentSymbol", {
             "textDocument": {"uri": _path_to_uri(file_name)}
+        })
+
+    def notify_change(self, file_name, newContent):
+        the_file = os.path.abspath(file_name)
+        self.file_version[the_file] += 1
+        self.notify("textDocument/didChange", {
+            "textDocument": {
+                "uri": _path_to_uri(the_file),
+                "version": self.file_version[the_file],
+            },
+            "contentChanges": [{
+                "text": newContent
+            }]
         })
