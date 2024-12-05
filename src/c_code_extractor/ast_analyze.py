@@ -250,7 +250,7 @@ def collect_calls(node: Node) -> list[tuple[str, Point, Point]]:
 
 def collect_types(node: Node) -> list[tuple[str, Point, Point]]:
     query = C_LANG.query(
-        r'(type_identifier)@ty'
+        r'[(type_identifier) (primitive_type)]@ty'
     )
     matches = query.matches(node)
     result = []
@@ -265,7 +265,7 @@ def collect_types(node: Node) -> list[tuple[str, Point, Point]]:
 
 def collect_identifiers(node: Node) -> list[tuple[str, Point, Point]]:
     query = C_LANG.query(
-        r'(identifier)@id'
+        r'[(identifier) (null)]@id'
     )
     matches = query.matches(node)
     result = []

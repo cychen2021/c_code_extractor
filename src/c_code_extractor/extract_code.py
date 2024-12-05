@@ -72,6 +72,7 @@ def main(src, output, function_depends_file):
         to_merge.sort(key=lambda x: x[0], reverse=True)
         slice_ = Slice(func_name, [x[1] for x in to_merge])
         os.makedirs(os.path.join(output, func_name), exist_ok=True)
+        includes = set()
         contents = []
         for item in slice_.to_merge:
             match item.kind:
@@ -80,13 +81,14 @@ def main(src, output, function_depends_file):
                     content = extract_content(item.item.file, item.item.start_point, item.item.end_point)
                 case 'include':
                     assert isinstance(item.item, str)
-                    content = f'#include "{item.item}"'
+                    includes.add(f'#include "{item.item}"')
                 case 'func':
                     assert isinstance(item.item, CodeLocation)
                     func_def_ast = get_ast_exact_match(item.item.file, item.item.start_point, item.item.end_point)
                     assert func_def_ast is not None
-                    content = get_func_header_from_def(func_def_ast) + ';'
+                    content = 'extern' + get_func_header_from_def(func_def_ast) + ';'
             contents.append(content)
+        contents = ['\n'.join(includes)] + contents
         with open(os.path.join(output, func_name, f'{func_name}.c'), 'w') as f:
             f.write('\n\n'.join(contents))
 

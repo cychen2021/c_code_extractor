@@ -176,3 +176,4 @@ cython_debug/
 
 playground/
 collected/*_gadgets/
+tmp/

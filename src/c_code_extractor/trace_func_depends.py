@@ -4,7 +4,7 @@ import os
 import os.path
 import click
 import json
-from ast_analyze import Point, get_ast_of_func_exact_match, collect_identifiers, get_code_item, get_ast_exact_match, collect_declaration_identifiers
+from ast_analyze import *
 from lsp_client import ClangD
 from lsp_server import uri_to_path
 from code_item import CodeItem
@@ -57,23 +57,31 @@ def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) 
     
     parents = {}
 
-    count = 0
     root_item = CodeItem('funcdef', file, (start_point[0], start_point[1]), (ast.end_point.row, ast.end_point.column), name=func_name)
     visited = set()
 
+    MAX_NUM = 100
     work_list = [(root_item, ast)]
     while work_list:
         item, current = work_list.pop()
         
-        if item in visited:
+        if item in visited or item != root_item and is_within((item.start_point, item.end_point), (root_item.start_point, root_item.end_point)):
             continue
+
+        if len(other_collect) + len(func_collect) + len(include_collect) > MAX_NUM:
+            warning = f'Warning: Too many items: {len(other_collect) + len(func_collect) + len(include_collect)}'
+            print(warning)
+            warnings.add(warning)
+            break
+        
         visited.add(item)
 
-        count += 1
         if item != root_item:
             other_collect.add(item)
 
-        identifiers = collect_identifiers(current)
+        normal_identifiers = collect_identifiers(current)
+        ty_identifiers = collect_types(current)
+        identifiers = normal_identifiers + ty_identifiers
         
         for id_name, start_point, end_point in identifiers:
             defs = clangd.get_definition(item.file, start_point[0], start_point[1])
@@ -133,10 +141,10 @@ def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) 
     other_collect_with_order = [CodeItemWithOrder(item, indices[item]) for item in other_collect_list]
     return func_collect_with_order, include_collect_with_order, other_collect_with_order, list(warnings)
 
-def process_one_batch(i, output, batches, src):
+def process_one_batch(i, output, batches, src, tqdm_tag: str | None = None):
     clangd = ClangD(src, src)
     with open(output.replace('%r', f'{i}'), 'w') as f:
-        for func in tqdm(batches[i], desc=f'Batch {i}'):
+        for func in tqdm(batches[i], desc=tqdm_tag):
             func_depends, include_depends, other_depends, warnings = extract_func(clangd, os.path.join(src, func['file']), func['start_point'], func['name'])
             item = {
                 'func': func,
@@ -148,7 +156,7 @@ def process_one_batch(i, output, batches, src):
             f.write(json.dumps(item) + '\n')
             del item, func_depends, include_depends, other_depends, warnings
 
-BATCH_SIZE = 100
+BATCH_SIZE = 10
     
 @click.command()
 @click.option('--src', '-i', type=click.Path(exists=True, dir_okay=True, file_okay=False), help='Path to the source file')
@@ -192,8 +200,10 @@ def main(src, func_list, output, start_batch, end_batch, split):
     else:
         # The code causes memory leak. Use a process to release the memory.
         with ProcessPoolExecutor(max_workers=1, max_tasks_per_child=1) as executor:
+            all_bacthes = end_batch - start_batch + 1
             for i in range(start_batch, end_batch + 1):
-                f = executor.submit(process_one_batch, i, output, batches, src)
+                batch_count = i - start_batch + 1
+                f = executor.submit(process_one_batch, i, output, batches, src, tqdm_tag=f'Batch {i} [{batch_count} / {all_bacthes}]')
                 f.result()
             
         
