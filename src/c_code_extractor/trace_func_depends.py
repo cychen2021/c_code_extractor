@@ -5,13 +5,51 @@ import os.path
 import click
 import json
 from ast_analyze import *
-from lsp_client import ClangD
+from lsp_client import ClangD, Edit
 from lsp_server import uri_to_path
 from code_item import CodeItem
 from tqdm import tqdm
 from defs import PROJECT_ROOT
 from concurrent.futures import ProcessPoolExecutor
 import tempfile
+from typing import Sequence
+
+def line_column_to_offset(line: int, column: int, line_sizes: Sequence[int]) -> int:
+    return sum(line_sizes[:line]) + column
+
+def apply_edits(context: str, edits: Sequence[Edit]) -> str:
+    for edit in edits:
+        print(f'{edit=}')
+    lines = context.split('\n')
+    
+    line_sizes = [len(line) + 1 for line in lines]
+    
+    edits_with_offset = []
+    for edit in edits:
+        start_row, start_column = edit.start_point
+        start_offset = line_column_to_offset(start_row, start_column, line_sizes)
+        end_row, end_column = edit.end_point
+        end_offset = line_column_to_offset(end_row, end_column, line_sizes)
+        edits_with_offset.append((start_offset, end_offset, edit.new_text))
+
+    edits_with_offset.sort(key=lambda x: x[0])
+    to_pop = []
+    for i in range(1, len(edits_with_offset)):
+        if not edits_with_offset[i][0] >= edits_with_offset[i-1][1]:
+            print(f'Overlapping edits {edits_with_offset[i-1]=}, {edits_with_offset[i]=}')
+            to_pop.append(i)
+    for i in reversed(to_pop):
+        edits_with_offset.pop(i)
+        
+    snippets = []
+    last_end_offset = 0
+    for start_offset, end_offset, new_text in edits_with_offset:
+        snippets.append(context[last_end_offset:start_offset])
+        snippets.append(new_text)
+        last_end_offset = end_offset
+        
+    snippets.append(context[last_end_offset:])
+    return ''.join(snippets)
 
 class CodeItemWithOrder:
     def __init__(self, code_item: CodeItem, order: int):
@@ -122,8 +160,6 @@ def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) 
         for macro in macros:
             range_ = get_macro_expanding_range(current, macro[1], macro[2])
             within_macros.add(range_)
-        print(f'{item.file=} {item.start_point=} {item.end_point=} {len(macros)=}')
-        
 
         def within_macro(start_point, end_point) -> bool:
             for range_ in within_macros:
@@ -176,10 +212,18 @@ def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) 
                 parents[code_item].add(item)
                 work_list.append((code_item, ast))
         
+        changes = []
         for start_point, end_point in within_macros:
-            response = clangd.get_macro_expansion(item.file, start_point, end_point)
-            print(f'{start_point=} {end_point=}')
-            print(f'{response=}')
+            tmp = clangd.get_macro_expansion(item.file, start_point, end_point)
+            changes.extend(tmp)
+
+        if changes:
+            if old_content is None:
+                with open(item.file, 'r') as f:
+                    old_content = f.read()
+
+            new_content = apply_edits(old_content, changes)
+            
         if old_content is not None:
             clangd.refresh_file_content(item.file, old_content)
         

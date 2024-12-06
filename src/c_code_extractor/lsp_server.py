@@ -4,7 +4,7 @@ import os.path
 import json
 from typing import Any, Literal
 
-def _path_to_uri(path):
+def path_to_uri(path):
     return "file://" + os.path.abspath(path)
 
 
@@ -115,7 +115,7 @@ class LSPServer:
     def initialize_lsp_server(self) -> 'LSPServer.InitResult':
         r = self.request("initialize", {
             'processId': os.getpid(),
-            'rootUri': _path_to_uri(self.cwd),
+            'rootUri': path_to_uri(self.cwd),
         })
         capabilities = r['result']['capabilities']
         semantic_tokens_legend = capabilities.get('semanticTokensProvider', {}).get('legend')
@@ -129,7 +129,7 @@ class LSPServer:
     
     def request_hover(self, file_name, line, character):
         return self.request('textDocument/hover', {
-            'textDocument': {'uri': _path_to_uri(file_name)},
+            'textDocument': {'uri': path_to_uri(file_name)},
             'position': {
                 'line': line,
                 'character': character,
@@ -138,7 +138,7 @@ class LSPServer:
     
     def request_code_action(self, file_name, start_point, end_point):
         return self.request('textDocument/codeAction', {
-            'textDocument': {'uri': _path_to_uri(file_name)},
+            'textDocument': {'uri': path_to_uri(file_name)},
             'range': {
                 'start': {
                     'line': start_point[0],
@@ -266,7 +266,7 @@ class LSPServer:
 
         self.notify("textDocument/didOpen", {
             "textDocument": {
-                "uri": _path_to_uri(filename),
+                "uri": path_to_uri(filename),
                 "languageId": language_id,
                 "version": 1,
                 "text": text,
@@ -274,7 +274,7 @@ class LSPServer:
         })
     
     def notify_close(self, file_name):
-        self.notify("textDocument/didClose", {"textDocument": {"uri": _path_to_uri(file_name)}})
+        self.notify("textDocument/didClose", {"textDocument": {"uri": path_to_uri(file_name)}})
         if self.file_version[file_name] > 1:
             with open(os.path.join(self.cwd, file_name), "w") as file:
                 file.write(self.original_content[file_name])
@@ -310,7 +310,7 @@ class LSPServer:
 
     def request_definition(self, file_name, line, character):
         return self.request("textDocument/definition", {
-            "textDocument": {"uri": _path_to_uri(file_name)},
+            "textDocument": {"uri": path_to_uri(file_name)},
             "position": {
                 "line": line,
                 "character": character,
@@ -319,7 +319,7 @@ class LSPServer:
 
     def request_type_definition(self, file_name, line, character):
         return self.request("textDocument/typeDefinition", {
-            "textDocument": {"uri": _path_to_uri(file_name)},
+            "textDocument": {"uri": path_to_uri(file_name)},
             "position": {
                 "line": line,
                 "character": character,
@@ -328,7 +328,7 @@ class LSPServer:
 
     def request_semantic_tokens_in_range(self, file_name, range, start_line, start_character, end_line, end_character):
         return self.request("textDocument/semanticTokens/range", {
-            "textDocument": {"uri": _path_to_uri(file_name)},
+            "textDocument": {"uri": path_to_uri(file_name)},
             "range": {
                 "start": {
                     "line": start_line,
@@ -343,12 +343,12 @@ class LSPServer:
     
     def request_semantic_tokens(self, file_name):
         return self.request("textDocument/semanticTokens/full", {
-            "textDocument": {"uri": _path_to_uri(file_name)}
+            "textDocument": {"uri": path_to_uri(file_name)}
         })
         
     def request_declaration(self, file_name, line, character):
         return self.request("textDocument/declaration", {
-            "textDocument": {"uri": _path_to_uri(file_name)},
+            "textDocument": {"uri": path_to_uri(file_name)},
             "position": {
                 "line": line,
                 "character": character,
@@ -357,7 +357,7 @@ class LSPServer:
 
     def request_references(self, file_name, line, character):
         return self.request("textDocument/references", {
-            "textDocument": {"uri": _path_to_uri(file_name)},
+            "textDocument": {"uri": path_to_uri(file_name)},
             "position": {
                 "line": line,
                 "character": character,
@@ -369,7 +369,7 @@ class LSPServer:
 
     def request_signature(self, file_name, line, character):
         return self.request("textDocument/typeDefinition", {
-            "textDocument": {"uri": _path_to_uri(file_name)},
+            "textDocument": {"uri": path_to_uri(file_name)},
             "position": {
                 "line": line,
                 "character": character,
@@ -378,7 +378,7 @@ class LSPServer:
 
     def request_all_symbols(self, file_name):
         return self.request("textDocument/documentSymbol", {
-            "textDocument": {"uri": _path_to_uri(file_name)}
+            "textDocument": {"uri": path_to_uri(file_name)}
         })
 
     def notify_change(self, file_name, newContent):
@@ -386,7 +386,7 @@ class LSPServer:
         self.file_version[the_file] += 1
         self.notify("textDocument/didChange", {
             "textDocument": {
-                "uri": _path_to_uri(the_file),
+                "uri": path_to_uri(the_file),
                 "version": self.file_version[the_file],
             },
             "contentChanges": [{

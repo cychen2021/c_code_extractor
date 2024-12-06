@@ -320,6 +320,7 @@ def get_macro_expanding_range(ast: Node, start_point: Point, end_point: Point) -
     query2 = C_LANG.query(
         r'((call_expression function: (identifier) @macro) @whole (#locate?))'
     )
+
     matches2 = query2.matches(ast, predicate=locate)
     match_idices2 = set()
     for idx, _ in matches2:

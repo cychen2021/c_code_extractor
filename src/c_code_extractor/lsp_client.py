@@ -1,9 +1,19 @@
-from lsp_server import LSPServer
+from lsp_server import LSPServer, path_to_uri
 from code_item import CodeItem
 import os.path
 import json
-from typing import Any
+from typing import Any, Sequence
 from ast_analyze import Point
+
+class Edit:
+    def __init__(self, new_text: str, start_point: Point, end_point: Point) -> None:
+        self.new_text = new_text
+        self.start_point = start_point
+        self.end_point = end_point
+    def __str__(self) -> str:
+        return f'{self.new_text=}, {self.start_point=}, {self.end_point=}'
+    def __repr__(self) -> str:
+        return str(self)
 
 class ClangD:
     def __init__(self, src, build) -> None:
@@ -82,7 +92,7 @@ class ClangD:
         assert 'result' in response, f'{response=}, {file=}, {line=}, {character=}'
         return response['result']
 
-    def get_macro_expansion(self, file: str, start_point: Point, end_point: Point) -> str | None:
+    def get_macro_expansion(self, file: str, start_point: Point, end_point: Point) -> Sequence[Edit]:
         response = self.lsp_server.request_code_action(file, start_point, end_point)
         code_actions = response['result']
         
@@ -92,10 +102,19 @@ class ClangD:
                 expand_macro_action = code_action
                 break
         if expand_macro_action is None:
-            return None
+            return []
         
-        tmp = self.lsp_server.request_execute_command(expand_macro_action['command'], expand_macro_action['arguments'])
-        return tmp
+        expansion = self.lsp_server.request_execute_command(expand_macro_action['command'], expand_macro_action['arguments'])
+        if expansion is None:
+            return []
+        all_changes = expansion['params']['edit']['changes']
+        file_uri = path_to_uri(file)
+        result = []
+        for change in all_changes[file_uri]:
+            start_point = Point((change['range']['start']['line'], change['range']['start']['character']))
+            end_point = Point((change['range']['end']['line'], change['range']['end']['character']))
+            result.append(Edit(change['newText'], start_point, end_point))
+        return result
 
     def refresh_file_content(self, file: str, content: str):
         self.lsp_server.notify_change(file, content)
