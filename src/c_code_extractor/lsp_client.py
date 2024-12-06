@@ -9,7 +9,7 @@ class ClangD:
     def __init__(self, src, build) -> None:
         self.lsp_server = LSPServer(
             executable='clangd',
-            lsp_args=['--compile-commands-dir', build],
+            lsp_args=['--compile-commands-dir', build,],
             cwd=src,
         )
         self.lsp_server.start()
@@ -25,7 +25,7 @@ class ClangD:
     
     def __del__(self) -> None:
         for command in self.compilation_commands:
-            self.lsp_server.notify_close(command['file'].removeprefix(os.path.abspath(self.src) + '/'))
+            self.lsp_server.notify_close(command['file'])
         self.lsp_server.stop()
     
     @staticmethod
@@ -82,11 +82,23 @@ class ClangD:
         assert 'result' in response, f'{response=}, {file=}, {line=}, {character=}'
         return response['result']
 
-    def get_macro_expansion(self, file: str, start_point: Point, end_point: Point):
-        response = self.lsp_server.request_ast(file, start_point, end_point)
-        # response = self.lsp_server.request_hover(file, line, character)
-        return response
+    def get_macro_expansion(self, file: str, start_point: Point, end_point: Point) -> str | None:
+        response = self.lsp_server.request_code_action(file, start_point, end_point)
+        code_actions = response['result']
+        
+        expand_macro_action = None
+        for code_action in code_actions:
+            if code_action['arguments'][0]['tweakID'] == 'ExpandMacro':
+                expand_macro_action = code_action
+                break
+        if expand_macro_action is None:
+            return None
+        
+        tmp = self.lsp_server.request_execute_command(expand_macro_action['command'], expand_macro_action['arguments'])
+        return tmp
 
     def refresh_file_content(self, file: str, content: str):
         self.lsp_server.notify_change(file, content)
         self.semantic_tokens_mapping.pop(file)
+        with open(file, 'w') as f:
+            f.write(content)

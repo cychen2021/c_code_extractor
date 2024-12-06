@@ -128,29 +128,38 @@ class LSPServer:
         return seq
     
     def request_hover(self, file_name, line, character):
-        return self.request("textDocument/hover", {
-            "textDocument": {"uri": _path_to_uri(file_name)},
-            "position": {
-                "line": line,
-                "character": character,
+        return self.request('textDocument/hover', {
+            'textDocument': {'uri': _path_to_uri(file_name)},
+            'position': {
+                'line': line,
+                'character': character,
             }
         })
     
-    def request_ast(self, file_name, start_point, end_point):
-        return self.request("textDocument/selectionRange", {
-            "textDocument": {"uri": _path_to_uri(file_name)},
-            "positions": [
-                {
-                    "line": start_point[0],
-                    "character": start_point[1],
+    def request_code_action(self, file_name, start_point, end_point):
+        return self.request('textDocument/codeAction', {
+            'textDocument': {'uri': _path_to_uri(file_name)},
+            'range': {
+                'start': {
+                    'line': start_point[0],
+                    'character': start_point[1],
                 },
-                {
-                    "line": end_point[0],
-                    "character": end_point[1],
+                'end': {
+                    'line': end_point[0],
+                    'character': end_point[1],
                 }
-            ]
+            },
+            'context': {
+                'diagnostics': [],
+            }
         })
-        
+    
+    def request_execute_command(self, command, arguments):
+        return self.request('workspace/executeCommand', {
+            'command': command,
+            'arguments': arguments,
+        })
+
     def start(self):
         import sys
         self._sequence = 0
@@ -203,6 +212,7 @@ class LSPServer:
         with open(os.path.join(self.cwd, filename), "r") as file:
             text = file.read()
         self.file_version[filename] = 1
+        self.original_content[filename] = text
 
         self.notify("textDocument/didOpen", {
             "textDocument": {
@@ -215,6 +225,9 @@ class LSPServer:
     
     def notify_close(self, file_name):
         self.notify("textDocument/didClose", {"textDocument": {"uri": _path_to_uri(file_name)}})
+        if self.file_version[file_name] > 1:
+            with open(os.path.join(self.cwd, file_name), "w") as file:
+                file.write(self.original_content[file_name])
         
     def compute_semantic_token_mapping(self, semantic_token_encoding) -> dict[tuple[int, int], dict[str, Any]]:
         assert len(semantic_token_encoding) % 5 == 0, f'{len(semantic_token_encoding)=}'

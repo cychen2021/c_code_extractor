@@ -11,6 +11,7 @@ from code_item import CodeItem
 from tqdm import tqdm
 from defs import PROJECT_ROOT
 from concurrent.futures import ProcessPoolExecutor
+import tempfile
 
 class CodeItemWithOrder:
     def __init__(self, code_item: CodeItem, order: int):
@@ -78,6 +79,7 @@ def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) 
             if to_cancel is not None:
                 old_content = _old_content
                 mask, to_erase = to_cancel
+                print(f'{mask=} {to_erase=}')
                 lines = old_content.split('\n')
                 for row in range(to_erase[0][0], to_erase[1][0] + 1):
                     for column in range(0 if row != to_erase[0][0] else to_erase[0][1], 
@@ -85,6 +87,13 @@ def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) 
                         if not point_is_within((row, column), mask):
                             lines[row] = lines[row][:column] + ' ' + lines[row][column+1:]
                 new_content = '\n'.join(lines)
+                with tempfile.NamedTemporaryFile('w', delete=False) as f:
+                    new_file = f.name
+                    f.write(new_content)
+                current = get_ast_exact_match(new_file, item.start_point, item.end_point)
+                assert current is not None
+                os.remove(new_file)
+                print(f'{item.file=}')
                 clangd.refresh_file_content(item.file, new_content)
 
         
@@ -108,8 +117,6 @@ def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) 
             kind = semantic_token['type']
             if kind == 'macro':
                 macros.append(token)
-        if old_content is not None:
-            clangd.refresh_file_content(item.file, old_content)
         
         within_macros = set()
         for macro in macros:
@@ -171,9 +178,10 @@ def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) 
         
         for start_point, end_point in within_macros:
             response = clangd.get_macro_expansion(item.file, start_point, end_point)
-            # print(f'{response=} {macro_name=} {start_point=} {end_point=}')
             print(f'{start_point=} {end_point=}')
             print(f'{response=}')
+        if old_content is not None:
+            clangd.refresh_file_content(item.file, old_content)
         
     assert root_item not in parents
     parents[root_item] = set()
