@@ -2,7 +2,7 @@ import subprocess
 import urllib.parse
 import os.path
 import json
-from typing import Any
+from typing import Any, Literal
 
 def _path_to_uri(path):
     return "file://" + os.path.abspath(path)
@@ -27,7 +27,7 @@ def check(executable):
     try:
         # TODO: enforce version
         clangd = subprocess.run(
-            [executable, "--version"],
+            [executable, '--version'],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
@@ -155,10 +155,60 @@ class LSPServer:
         })
     
     def request_execute_command(self, command, arguments):
-        return self.request('workspace/executeCommand', {
-            'command': command,
-            'arguments': arguments,
-        })
+        assert command == 'clangd.applyTweak', f'{command=}'
+        assert arguments[0]['tweakID'] == 'ExpandMacro', f'{arguments=}'
+        return self.request_special(
+            'expandMacro',
+            'workspace/executeCommand',
+            {
+                'command': command,
+                'arguments': arguments,
+            },
+            command=command,
+        )
+
+    def send_response(self, id, result):
+        assert self._process is not None
+        assert self._process.stdin is not None
+        response = {
+            'jsonrpc': '2.0',
+            'id': id,
+            'result': result,
+        }
+        content = json.dumps(response)
+        header = f'Content-Length: {len(content)}\r\n\r\n'
+        self._process.stdin.write(header + content)
+        self._process.stdin.flush()
+
+    def request_special(self, kind: Literal['expandMacro'], method, params, **kwargs):
+        @staticmethod
+        def _wait_apply_edit(file):
+            while True:
+                header = {}
+                while True:
+                    line = file.readline().strip()
+                    if not line:
+                        break
+                    key, value = line.split(":", 1)
+                    header[key.strip()] = value.strip()
+
+                content = file.read(int(header["Content-Length"]))
+                response = json.loads(content)
+                if response['method'] == 'workspace/applyEdit':
+                    return response
+        match kind:
+            case 'expandMacro':
+                if kwargs['command'] == 'clangd.applyTweak' and params['arguments'][0]['tweakID'] == 'ExpandMacro':
+                    assert self._process is not None
+                    assert self._process.stdin is not None
+                    assert self._process.stdout is not None
+                    message_seq = self.get_and_inc_sequence()
+                    self._process.stdin.write(self._to_lsp_request(message_seq, method, params))
+                    self._process.stdin.flush()
+                    edit = _wait_apply_edit(self._process.stdout)
+                    edit_id = edit['id']
+                    self.send_response(edit_id, {'applied': True})
+                    return edit
 
     def start(self):
         import sys

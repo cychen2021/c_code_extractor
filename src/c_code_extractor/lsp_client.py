@@ -9,7 +9,7 @@ class ClangD:
     def __init__(self, src, build) -> None:
         self.lsp_server = LSPServer(
             executable='clangd',
-            lsp_args=['--compile-commands-dir', build,],
+            lsp_args=['--compile-commands-dir', build],
             cwd=src,
         )
         self.lsp_server.start()
