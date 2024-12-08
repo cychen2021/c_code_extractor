@@ -36,7 +36,7 @@ def extract_content(file: str, start_point: Point, end_point: Point) -> str:
         middle_lines = lines[start_point[0]+1:end_point[0]]
         last_line = lines[end_point[0]][:end_point[1]]
         # The Tree-sitter C grammar has a bug. The trailing semicolon of `struct {...};` is not included in the range of the struct.
-        if end_point[1] < len(lines[end_point[0]]) and lines[end_point[0]][end_point[1]] == ';':
+        if first_line.count('struct') > 0 and end_point[1] < len(lines[end_point[0]]) and lines[end_point[0]][end_point[1]] == ';':
             last_line += ';'
         return '\n'.join([first_line] + middle_lines + [last_line])
 

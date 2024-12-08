@@ -25,6 +25,66 @@ def offset_to_line_column(offset: int, line_sizes: Sequence[int]) -> tuple[int, 
 
 RangeMapping = dict[tuple[int, int], int]
 
+def intersect(a: tuple[int, int], b: tuple[int, int]) -> tuple[int, int] | None:
+    r = max(a[0], b[0]), min(a[1], b[1])
+    if r[1] <= r[0]:
+        return None
+    return r
+
+def subtract(a: tuple[int, int], b: tuple[int, int]) -> list[tuple[int, int]]:
+    if a[0] >= b[1] or a[1] <= b[0]:
+        return [a]
+    if a[0] < b[0] and a[1] > b[1]:
+        return [(a[0], b[0]), (b[1], a[1])]
+    if a[0] < b[0]:
+        return [(a[0], b[0])]
+    if a[1] > b[1]:
+        return [(b[1], a[1])]
+    return []
+
+def subtract_series(a: list[tuple[int, int]], b: tuple[int, int]) -> list[tuple[int, int]]:
+    result = []
+    for s in a:
+        result.extend(subtract(s, b))
+    return result
+
+def join_mappings(mapping1: RangeMapping, mapping2: RangeMapping) -> RangeMapping:
+    intersects1 = {}
+    intersects2 = {}
+    for r1 in mapping1:
+        for r2 in mapping2:
+            its = intersect(r1, r2)
+            if its is not None:
+                if r1 not in intersects1:
+                    intersects1[r1] = []
+                if r2 not in intersects2:
+                    intersects2[r2] = []
+                intersects1[r1].append((its, r2))
+                intersects2[r2].append((its, r1))
+    result = {}
+    for r1, mapped in mapping1.items():
+        if r1 in intersects1:
+            lst = intersects1[r1]
+            sub = [r1]
+            for its, r2 in lst:
+                sub = subtract_series(sub, its)
+                result[its] = mapped + mapping2[r2]
+            for s in sub:
+                result[s] = mapped
+        else:
+            result[r1] = mapped
+    for r2, mapped in mapping2.items():
+        if r2 not in intersects2:
+            result[r2] = mapped
+        else:
+            lst = intersects2[r2]
+            sub = [r2]
+            for its, r1 in lst:
+                sub = subtract_series(sub, its)
+            for s in sub:
+                result[s] = mapped
+    return result
+
 def apply_edits(context: str, edits: Sequence[Edit]) -> tuple[str, RangeMapping, RangeMapping]:
     lines = context.split('\n')
     
@@ -164,9 +224,9 @@ def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) 
             
             with open(item.file, 'r') as f:
                 old_content = f.read()
-            item_semantic_token = clangd.get_semantic_token(item.file, item.start_point)
+            item_semantic_token = clangd.get_semantic_token(item.file, current[1])
             if item_semantic_token is not None and item_semantic_token['type'] == 'comment':
-                f = executor.submit(aa.cancel_macro, old_content, item.start_point, item.end_point)
+                f = executor.submit(aa.cancel_macro, old_content, current[1], current[2])
                 refreshed_content = f.result()
                 clangd.refresh_file_content(item.file, refreshed_content)
             else:
@@ -191,13 +251,7 @@ def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) 
             
                 within_macros = set()
                 for macro in macros:
-                    try:
-                        f = executor.submit(aa.leak_wrapper, 'get_macro_expanding_range', current_ast_loc, macro[1], macro[2])
-                        range_ = f.result()
-                    except:
-                        print(f'Error when processing {item=}, {macro=}')
-                        raise
-                    within_macros.add(range_)
+                    within_macros.add((macro[1], macro[2]))
 
                 def within_macro(start_point, end_point) -> bool:
                     for range_ in within_macros:
@@ -261,7 +315,6 @@ def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) 
                             func_collect.add(code_item)
                     else:
                         ast_loc = (def_file, code_item.start_point, code_item.end_point)
-                        # assert ast is not None
                         if item.file == code_item.file and not macro_mode:
                             real_start_point = map_range(new_content, old_content, mapping_back, code_item.start_point)
                             real_end_point = map_range(new_content, old_content, mapping_back, code_item.end_point) 
@@ -274,28 +327,84 @@ def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) 
                         work_list.append((code_item, ast_loc))
                 return macros if macro_mode else []
             
-            macros = list(one_round(current))
-            original_num = len(macros)
-            
-            existing = set()
-            to_pop = []
-            for i, (macro_name, macro_start, macro_end) in enumerate(macros):
-                if macro_name in existing:
-                    to_pop.append(i)
-                else:
-                    existing.add(macro_name)
-            for i in reversed(to_pop):
-                macros.pop(i)
-            
-            print(f'Macro num: {original_num} -> {len(macros)}')
-            changes = []
-            for _, macro_start, macro_end in macros:
-                tmp = clangd.get_macro_expansion(item.file, macro_start, macro_end)
-                if not tmp:
-                    continue
-                changes.append(tmp)
+            def find_macro_expansions(current, ranges: list[tuple[Point, Point]] | None) -> Sequence[Sequence[Edit]]:
+                macros = list(one_round(current))
+                
+                changes = []
+                for _, macro_start, macro_end in macros:
+                    if ranges is not None:
+                        if not any(aa.is_within((macro_start, macro_end), r) for r in ranges):
+                            continue
+                    tmp = clangd.get_macro_expansion(item.file, macro_start, macro_end)
+                    if not tmp:
+                        continue
+                    changes.append(tmp)
+                return changes
 
-            multiworlds = apply_edits_multiworld(refreshed_content, changes)
+            id_mapping = {
+                (0, len(refreshed_content)): 0
+            }
+            macro_work_list: list[tuple[str, RangeMapping, RangeMapping, list[tuple[Point, Point]] | None]] = \
+                [(refreshed_content, id_mapping, id_mapping, None)]
+            multiworlds: list[tuple[str, RangeMapping, RangeMapping]] = []
+            count = 0
+            while True:
+                if not macro_work_list:
+                    break
+                world = macro_work_list.pop()
+                world_start_point = map_range(refreshed_content, world[0], mapping=world[2], point=current[1])
+                world_end_point = map_range(refreshed_content, world[0], mapping=world[2], point=current[2])
+                if isinstance(world_start_point, str):
+                    warning = f'Error when mapping range: {item=}, with message {world_start_point}'
+                    warnings.add(warning)
+                    continue
+                if isinstance(world_end_point, str):
+                    warning = f'Error when mapping range: {item=}, with message {world_end_point}'
+                    warnings.add(warning)
+                    continue
+                multiworlds.append((world[0], world[1], world[2]))
+                if count == 2:
+                    print(f'{world[1]}, {world[2]}')
+                    with open('tmp.c', 'w') as f:
+                        f.write(world[0])
+                clangd.refresh_file_content(item.file, world[0])
+                count += 1
+                print(f'Expansion round {count}')
+                if count > 50:
+                    warning = f'Macro expansion limit: {item=}'
+                    print(warning)
+                    warnings.add(warning)
+                    break
+                try:
+                    macro_expansions = find_macro_expansions((item.file, world_start_point, world_end_point), world[3])
+                except aa.NoAstError:
+                    print(f'No AST: {item=}, {world[1]=}, {world[2]=}, {world_start_point=}, {world_end_point=}')
+                    with open('error.c', 'w') as f:
+                        f.write(world[0])
+                    raise
+                new_multiworlds = apply_edits_multiworld(world[0], macro_expansions)
+                print(f'{len(new_multiworlds)=}')
+                for (new_world, reverse_mapping, mapping), edits in zip(new_multiworlds, macro_expansions):
+                    if new_world == world[0]:
+                        continue
+                    mapped_reverse_mapping = join_mappings(world[1], reverse_mapping)
+                    mapped_mapping = join_mappings(world[2], mapping)
+                    expanded_ranges: list[tuple[Point, Point]] = []
+                    for edit in edits:
+                        start_point = edit.start_point
+                        end_point = edit.end_point
+                        mapped_start_point = map_range(world[0], new_world, mapping, start_point)
+                        mapped_end_point = map_range(world[0], new_world, mapping, end_point)
+                        if isinstance(mapped_start_point, str):
+                            warning = f'Error when mapping range: {item=}, with message {mapped_start_point}'
+                            warnings.add(warning)
+                            continue
+                        if isinstance(mapped_end_point, str):
+                            warning = f'Error when mapping range: {item=}, with message {mapped_end_point}'
+                            warnings.add(warning)
+                            continue
+                        expanded_ranges.append((mapped_start_point, mapped_end_point))
+                    macro_work_list.append((new_world, mapped_reverse_mapping, mapped_mapping, expanded_ranges)) 
 
             start = datetime.now()
             remaining = -1

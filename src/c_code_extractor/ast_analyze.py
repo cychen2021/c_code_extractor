@@ -358,25 +358,17 @@ def cancel_macro(file_content: str, start_point: Point, end_point: Point) -> str
     return cancel_macro_in_ast(ast.root_node, file_content, start_point, end_point)
 
 def cancel_macro_in_ast(ast: Node, old_content, start_point: Point, end_point: Point) -> str:
-    q2 = C_LANG.query(
-        r'((preproc_ifdef name: (_) @name . (_)+ @enclosed . alternative: (preproc_else (_)*) .) @macro @ifdef (#locate?))'
-    )
-    q2_prime = C_LANG.query(
-        r'((preproc_if condition: (_) @cond . (_)* . alternative: (preproc_else (_)+ @enclosed) .) @macro (#locate?))'
-    )
-    q3 = C_LANG.query(
-        r'((preproc_ifdef name: (_) @name . (_)* . alternative: (preproc_else (_)+ @enclosed) .) @macro @ifdef (#locate?))'
-    )
-    q3_prime = C_LANG.query(
-        r'((preproc_if condition: (_) @cond . (_)+ @enclosed . alternative: (preproc_else (_)*) .) @macro (#locate?))'
-    )
-
-    # Tree-sitter has a bug. An anchor at the end of the pattern causes missing matches.
     q1 = C_LANG.query(
         r'((preproc_ifdef name: (_) @name . (_)+ @enclosed) @macro @ifdef (#locate?))'
     )
     q1_prime = C_LANG.query(
         r'((preproc_if condition: (_) @cond . (_)+ @enclosed) @macro (#locate?))'
+    )
+    q2 = C_LANG.query(
+        r'((preproc_if condition: (_) @cond . (_)* . alternative: (preproc_else (_)+ @enclosed) .) @macro (#locate?))'
+    )
+    q2_prime = C_LANG.query(
+        r'((preproc_ifdef name: (_) @name . (_)* . alternative: (preproc_else (_)+ @enclosed) .) @macro @ifdef (#locate?))'
     )
     
     def get_range(nodes: list[Node]) -> tuple[Point, Point]:
@@ -400,8 +392,6 @@ def cancel_macro_in_ast(ast: Node, old_content, start_point: Point, end_point: P
     matches1_prime = q1_prime.matches(ast, predicate=locate)
     matches2 = q2.matches(ast, predicate=locate)
     matches2_prime = q2_prime.matches(ast, predicate=locate)
-    matches3 = q3.matches(ast, predicate=locate)
-    matches3_prime = q3_prime.matches(ast, predicate=locate)
 
     new_content = old_content
 
@@ -430,28 +420,28 @@ def cancel_macro_in_ast(ast: Node, old_content, start_point: Point, end_point: P
             ifdef_end = name_node.end_byte
             size = ifdef_end - ifdef_start
             assert size >= 8
-            new_content = new_content[:ifdef_start] + '#if 1' + ' ' * (size - 5) + new_content[ifdef_end:]
+            new_content = new_content[:ifdef_start] + '#if 0' + ' ' * (size - 5) + new_content[ifdef_end:]
     if len(matches2_prime) > 0:
         for m in matches2_prime:
             cond_node = m[1]['cond'][0]
             size = cond_node.end_byte - cond_node.start_byte
             assert size >= 1
-            new_content = new_content[:cond_node.start_byte] + '1' + ' ' * (size - 1) + new_content[cond_node.end_byte:]
+            new_content = new_content[:cond_node.start_byte] + '0' + ' ' * (size - 1) + new_content[cond_node.end_byte:]
     
 
-    if len(matches3) > 0:
-        for m in matches3:
-            ifdef_node = m[1]['ifdef'][0]
-            name_node = m[1]['name'][0]
-            ifdef_start = ifdef_node.start_byte
-            ifdef_end = name_node.end_byte
-            size = ifdef_end - ifdef_start
-            assert size >= 8
-            new_content = new_content[:ifdef_start] + '#if 1' + ' ' * (size - 5) + new_content[ifdef_end:]
-    if len(matches3_prime) > 0:
-        for m in matches3_prime:
-            cond_node = m[1]['cond'][0]
-            size = cond_node.end_byte - cond_node.start_byte
-            assert size >= 1
-            new_content = new_content[:cond_node.start_byte] + '1' + ' ' * (size - 1) + new_content[cond_node.end_byte:]
+    # if len(matches3) > 0:
+    #     for m in matches3:
+    #         ifdef_node = m[1]['ifdef'][0]
+    #         name_node = m[1]['name'][0]
+    #         ifdef_start = ifdef_node.start_byte
+    #         ifdef_end = name_node.end_byte
+    #         size = ifdef_end - ifdef_start
+    #         assert size >= 8
+    #         new_content = new_content[:ifdef_start] + '#if 0' + ' ' * (size - 5) + new_content[ifdef_end:]
+    # if len(matches3_prime) > 0:
+    #     for m in matches3_prime:
+    #         cond_node = m[1]['cond'][0]
+    #         size = cond_node.end_byte - cond_node.start_byte
+    #         assert size >= 1
+    #         new_content = new_content[:cond_node.start_byte] + '1' + ' ' * (size - 1) + new_content[cond_node.end_byte:]
     return new_content
