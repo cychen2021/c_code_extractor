@@ -178,3 +178,4 @@ playground/
 collected/*_gadgets/
 tmp/
 .VSCodeCounter
+error.c
