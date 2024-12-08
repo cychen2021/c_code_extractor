@@ -130,8 +130,6 @@ def _topo_sort(parents: dict[CodeItem, list[CodeItem]], all_items: list[CodeItem
     return result
 
 def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) -> tuple[list[CodeItemWithOrder], list[CodeItemWithOrder], list[CodeItemWithOrder], list[str]]:
-    if func_name != 'ABRThandler':
-        return [], [], [], []
     ast = aa.get_ast_of_func_exact_match(file, start_point, func_name)
     assert ast is not None
     
