@@ -364,7 +364,7 @@ def main(src, func_list, output, start_batch, end_batch, split):
                 f.result()
                 elapsed = (datetime.now() - start).seconds
                 
-                average = elapsed / (end_batch - start_batch + 1)
+                average = elapsed / (i - start_batch + 1)
                 remaining = average * (end_batch - i)
             
         

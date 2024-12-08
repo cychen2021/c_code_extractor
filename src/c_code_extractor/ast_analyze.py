@@ -417,7 +417,6 @@ def cancel_macro_in_ast(ast: Node, old_content, start_point: Point, end_point: P
             ifdef_node = m[1]['ifdef'][0]
             name_node = m[1]['name'][0]
             
-            # new_content = new_content[:ifdef_node.start_byte] + '' + new_content[ifdef_node.end_byte:]
             ifdef_start = ifdef_node.start_byte
             ifdef_end = name_node.end_byte
             size = ifdef_end - ifdef_start
