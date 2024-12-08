@@ -261,7 +261,7 @@ def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) 
                 else:
                     ast = get_ast_exact_match(def_file, code_item.start_point, code_item.end_point)
                     assert ast is not None
-                    if not macro_mode:
+                    if item.file == code_item.file and not macro_mode:
                         real_start_point = map_range(new_content, old_content, mapping_back, code_item.start_point)
                         real_end_point = map_range(new_content, old_content, mapping_back, code_item.end_point) 
                         code_item = CodeItem(code_item.kind, code_item.file, real_start_point, real_end_point, name=code_item.name)
