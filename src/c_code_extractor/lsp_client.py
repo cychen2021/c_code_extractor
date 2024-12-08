@@ -118,6 +118,6 @@ class ClangD:
 
     def refresh_file_content(self, file: str, content: str):
         self.lsp_server.notify_change(file, content)
-        self.semantic_tokens_mapping.pop(file)
+        self.semantic_tokens_mapping.pop(file, None)
         with open(file, 'w') as f:
             f.write(content)

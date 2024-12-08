@@ -73,16 +73,20 @@ def apply_edits(context: str, edits: Sequence[Edit]) -> tuple[str, RangeMapping,
     new_contents = ''.join(snippets)
     return new_contents, reverse_mapping, mapping
 
-def map_range(content: str, new_content: str, mapping: dict[tuple[int, int], int], point: Point) -> Point:
+def map_range(content: str, new_content: str, mapping: dict[tuple[int, int], int], point: Point) -> Point | str:
     line_sizes = [len(line) + 1 for line in content.split('\n')]
     new_line_sizes = [len(line) + 1 for line in new_content.split('\n')]
     
     offset = line_column_to_offset(point[0], point[1], line_sizes)
-    for (l, r), size_change in mapping.items():
-        if l <= offset <= r:
+    items = list(sorted(mapping.items(), key=lambda x: x[0][0]))
+    for i, ((l, r), size_change) in enumerate(items):
+        if l <= offset < r:
             retval = Point(offset_to_line_column(offset + size_change, new_line_sizes))
             return retval
-    assert False, f'{point=}, {offset=}, {mapping=}'
+        if i >= 1 and items[i-1][0][1] <= offset < l:
+            retval = Point(offset_to_line_column(items[i-1][0][1], new_line_sizes))
+            return retval
+    return f'{point=}, {offset=}, {mapping=}'
 
 def apply_edits_multiworld(context: str, edit_batches: Sequence[Sequence[Edit]]) -> Sequence[tuple[str, RangeMapping, RangeMapping]]:
     worlds = []
@@ -169,7 +173,7 @@ def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) 
         def one_round(current_ast, *, 
                       macro_mode=True,
                       old_content: str = '',
-                      mapping: RangeMapping = {},
+                    #   mapping: RangeMapping = {},
                       new_content: str = '', 
                       mapping_back: RangeMapping = {}) -> Sequence[tuple[str, Point, Point]]:
             tokens = collect_type_and_identifiers(current_ast)
@@ -273,9 +277,29 @@ def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) 
             clangd.refresh_file_content(item.file, new_content)
             new_start_point = map_range(refreshed_content, new_content, mapping, item.start_point)
             new_end_point = map_range(refreshed_content, new_content, mapping, item.end_point)
+            
+            mapping_error = False
+            if isinstance(new_start_point, str):
+                warning = f'Error when mapping range: {item=}, with message {new_start_point}'
+                warnings.add(warning)
+                mapping_error = True
+            if isinstance(new_end_point, str):
+                warning = f'Error when mapping range: {item=}, with message {new_end_point}'
+                warnings.add(warning)
+                mapping_error = True
+            if mapping_error:
+                continue
+            
+            assert not isinstance(new_start_point, str)
+            assert not isinstance(new_end_point, str)
             current = get_ast_exact_match(item.file, new_start_point, new_end_point)
-            assert current is not None, f'{item.file=} {new_start_point=}, {new_end_point=}'
-            one_round(current, macro_mode=False, old_content=refreshed_content, mapping=mapping, 
+            try:
+                assert current is not None, f'{item.file=} {new_start_point=}, {new_end_point=}'
+            except:
+                warning = f'Error when getting AST: {item=}, {new_start_point=}, {new_end_point=}, new_content=|{new_content}|'
+                warnings.add(warning)
+                continue
+            one_round(current, macro_mode=False, old_content=refreshed_content, 
                       new_content=new_content, mapping_back=mapping_back)
         clangd.refresh_file_content(item.file, old_content)
         
