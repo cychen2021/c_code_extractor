@@ -2,8 +2,6 @@ from tree_sitter import Parser, Language, Node
 import tree_sitter_c as tsc
 from code_item import CodeItem
 from functools import cmp_to_key
-# from typing import Sequence
-from concurrent.futures import ThreadPoolExecutor
 
 Point = tuple[int, int]
 C_LANG = Language(tsc.language())
@@ -305,9 +303,13 @@ def collect_declaration_identifiers(node: Node) -> list[tuple[str, Point, Point]
                            (n.end_point.row, n.end_point.column)))
     return list(result)
 
+class NoAstError(Exception):
+    pass
+
 def leak_wrapper(function_name, ast_loc: tuple[str, Point, Point], *args, **kwargs):
     ast = get_ast_exact_match(*ast_loc)
-    assert ast is not None
+    if ast is None:
+        raise NoAstError()
     function = globals()[function_name]
     return function(ast, *args, **kwargs)
 

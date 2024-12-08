@@ -2,7 +2,6 @@ import os
 import os.path
 import click
 import json
-# from ast_analyze import *
 import ast_analyze as aa
 from ast_analyze import Point
 from lsp_client import ClangD, Edit
@@ -12,8 +11,7 @@ from tqdm import tqdm
 from defs import PROJECT_ROOT
 from concurrent.futures import ProcessPoolExecutor
 from typing import Sequence
-import gc
-import objgraph
+from datetime import datetime
 
 def line_column_to_offset(line: int, column: int, line_sizes: Sequence[int]) -> int:
     return sum(line_sizes[:line]) + column
@@ -207,7 +205,7 @@ def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) 
                     return False
 
                 for i, (id_name, start_point, end_point) in enumerate(tokens):
-                    print(f'One-round token {i + 1} / {len(tokens)}')
+                    # print(f'One-round token {i + 1} / {len(tokens)}')
                     if macro_mode:
                         if not within_macro(start_point, end_point):
                             continue
@@ -275,8 +273,20 @@ def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) 
                         work_list.append((code_item, ast_loc))
                 return macros if macro_mode else []
             
-            macros = one_round(current)
+            macros = list(one_round(current))
+            original_num = len(macros)
             
+            existing = set()
+            to_pop = []
+            for i, (macro_name, macro_start, macro_end) in enumerate(macros):
+                if macro_name in existing:
+                    to_pop.append(i)
+                else:
+                    existing.add(macro_name)
+            for i in reversed(to_pop):
+                macros.pop(i)
+            
+            print(f'Macro num: {original_num} -> {len(macros)}')
             changes = []
             for _, macro_start, macro_end in macros:
                 tmp = clangd.get_macro_expansion(item.file, macro_start, macro_end)
@@ -285,8 +295,17 @@ def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) 
                 changes.append(tmp)
 
             multiworlds = apply_edits_multiworld(refreshed_content, changes)
+
+            start = datetime.now()
+            remaining = -1
+            elapsed = 0
+            MAX_TIME = 60 * 20
             for i, (new_content, mapping_back, mapping) in enumerate(multiworlds):
-                print(f'World {i + 1} / {len(multiworlds)}')
+                if elapsed > MAX_TIME:
+                    warning = f'World process timeout: {item=}, {len(multiworlds)=}, {i=}.'
+                    warnings.add(warning)
+                    break
+                print(f'({elapsed // 60} / {remaining // 60 if remaining > 0 else remaining}) World {i + 1} / {len(multiworlds)}')
                 clangd.refresh_file_content(item.file, new_content)
                 new_start_point = map_range(refreshed_content, new_content, mapping, item.start_point)
                 new_end_point = map_range(refreshed_content, new_content, mapping, item.end_point)
@@ -305,16 +324,17 @@ def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) 
                 
                 assert not isinstance(new_start_point, str)
                 assert not isinstance(new_end_point, str)
-                # current = get_ast_exact_match(item.file, new_start_point, new_end_point)
                 current_ast_loc = (item.file, new_start_point, new_end_point)
                 try:
-                    assert current is not None, f'{item.file=} {new_start_point=}, {new_end_point=}'
-                except:
+                    one_round(current_ast_loc, macro_mode=False, old_content=refreshed_content, 
+                            new_content=new_content, mapping_back=mapping_back)
+                except aa.NoAstError:
                     warning = f'Error when getting AST: {item=}, {new_start_point=}, {new_end_point=}, new_content=|{new_content}|'
                     warnings.add(warning)
                     continue
-                one_round(current_ast_loc, macro_mode=False, old_content=refreshed_content, 
-                        new_content=new_content, mapping_back=mapping_back)
+                elapsed = (datetime.now() - start).seconds
+                average = elapsed / (i + 1)
+                remaining = min(MAX_TIME, average * (len(multiworlds) - i))
             clangd.refresh_file_content(item.file, old_content)
         
     assert root_item not in parents
@@ -395,7 +415,6 @@ def main(src, func_list, output, start_batch, end_batch, split, batch_size):
                 f.write(json.dumps(item) + '\n')
                 del item, func_depends, include_depends, other_depends, warnings
     else:
-        from datetime import datetime
         # The code causes memory leak. Use a process to release the memory.
         with ProcessPoolExecutor(max_workers=1, max_tasks_per_child=1) as executor:
             all_bacthes = end_batch - start_batch + 1
