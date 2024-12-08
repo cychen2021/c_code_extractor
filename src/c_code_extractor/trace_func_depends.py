@@ -115,6 +115,7 @@ def _topo_sort(parents: dict[CodeItem, list[CodeItem]], all_items: list[CodeItem
         if item in visited:
             return
         visited.add(item)
+        assert item in parents, f'{item=}'
         for parent in parents[item]:
             dfs(parent, visited, result)
         result.append(item)
@@ -183,7 +184,11 @@ def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) 
         
             within_macros = set()
             for macro in macros:
-                range_ = get_macro_expanding_range(current_ast, macro[1], macro[2])
+                try:
+                    range_ = get_macro_expanding_range(current_ast, macro[1], macro[2])
+                except:
+                    print(f'Error when processing {item=}, {macro=}')
+                    raise
                 within_macros.add(range_)
 
             def within_macro(start_point, end_point) -> bool:
@@ -230,16 +235,16 @@ def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) 
                     continue
 
                 if code_item.kind == 'funcdef':
+                    if item.file == code_item.file and not macro_mode:
+                        real_start_point = map_range(new_content, old_content, mapping_back, code_item.start_point)
+                        real_end_point = map_range(new_content, old_content, mapping_back, code_item.end_point) 
+                        code_item = CodeItem(code_item.kind, code_item.file, real_start_point, real_end_point, name=code_item.name)
+                
                     if code_item != root_item and code_item not in parents:
                         parents[code_item] = set()
                     if code_item != root_item:
                         parents[code_item].add(item)
 
-                        if item.file == code_item.file and not macro_mode:
-                            real_start_point = map_range(new_content, old_content, mapping_back, code_item.start_point)
-                            real_end_point = map_range(new_content, old_content, mapping_back, code_item.end_point) 
-                            code_item = CodeItem(code_item.kind, code_item.file, real_start_point, real_end_point, name=code_item.name)
-                
                         func_collect.add(code_item)
                 else:
                     ast = get_ast_exact_match(def_file, code_item.start_point, code_item.end_point)

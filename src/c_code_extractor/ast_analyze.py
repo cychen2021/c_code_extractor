@@ -315,7 +315,7 @@ def get_macro_expanding_range(ast: Node, start_point: Point, end_point: Point) -
             case _:
                 return True
     query1 = C_LANG.query(
-        r'([(identifier) (null)] @macro @whole (#locate?))'
+        r'([(identifier) (null) (type_identifier)] @macro @whole (#locate?))'
     )
     query2 = C_LANG.query(
         r'((call_expression function: (identifier) @macro) @whole (#locate?))'
