@@ -321,19 +321,20 @@ BATCH_SIZE = 10
 @click.option('--start-batch', '-s', type=int, default=-1, help='Start batch')
 @click.option('--end-batch', '-e', type=int, default=-1, help='End batch')
 @click.option('--split/--no-split', '-p/-m', help='Split the output file')
-def main(src, func_list, output, start_batch, end_batch, split):
+@click.option('--batch-size', '-b', type=int, default=BATCH_SIZE, help='Batch size')
+def main(src, func_list, output, start_batch, end_batch, split, batch_size):
     all_func_list = json.load(open(func_list, 'r'))
 
-    batch_num = len(all_func_list) // BATCH_SIZE
+    batch_num = len(all_func_list) // batch_size
     if start_batch == -1 or end_batch == -1:
         print(f'There are {batch_num} batches. Please specify the start and end batch.')
         return
     if start_batch < 0 or start_batch >= batch_num or end_batch < 0 or end_batch >= batch_num:
         print(f'Invalid start_batch or end_batch')
         return
-    batches = [all_func_list[i*BATCH_SIZE:(i+1)*BATCH_SIZE] for i in range(batch_num)]
-    if len(all_func_list) % BATCH_SIZE != 0:
-        batches[-1].extend(all_func_list[batch_num*BATCH_SIZE:])
+    batches = [all_func_list[i*batch_size:(i+1)*batch_size] for i in range(batch_num)]
+    if len(all_func_list) % batch_size != 0:
+        batches[-1].extend(all_func_list[batch_num*batch_size:])
     
     if not split:
         clangd = ClangD(src, src)
