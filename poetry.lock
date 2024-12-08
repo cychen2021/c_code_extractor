@@ -60,6 +60,20 @@ extra = ["lxml (>=4.6)", "pydot (>=3.0.1)", "pygraphviz (>=1.14)", "sympy (>=1.1
 test = ["pytest (>=7.2)", "pytest-cov (>=4.0)"]
 
 [[package]]
+name = "objgraph"
+version = "3.6.2"
+description = "Draws Python object reference graphs with graphviz"
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "objgraph-3.6.2-py3-none-any.whl", hash = "sha256:8114c97712291c3ba30d882406a384d0a7651b307ea9a06e0d83836ccde85e15"},
+    {file = "objgraph-3.6.2.tar.gz", hash = "sha256:00b9f2f40f7422e3c7f45a61c4dafdaf81f03ff0649d6eaec866f01030e51ad8"},
+]
+
+[package.extras]
+ipython = ["graphviz"]
+
+[[package]]
 name = "readchar"
 version = "4.2.1"
 description = "Library to easily read single chars and key strokes"
@@ -168,4 +182,4 @@ core = ["tree-sitter (>=0.22,<1.0)"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.13"
-content-hash = "5654652e6c6e6252d9fa0d4fd82ae5dc6bb2d7b0105b322fa228b5381106eb18"
+content-hash = "938f2cd9da4a77da1cb677525a03b7b7ac3dcb972645524a323afd66636166cc"

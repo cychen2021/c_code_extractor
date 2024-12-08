@@ -17,6 +17,9 @@ readchar = "^4.2.1"
 dill = "^0.3.9"
 
 
+[tool.poetry.group.dev.dependencies]
+objgraph = "^3.6.2"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
