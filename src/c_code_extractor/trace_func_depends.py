@@ -372,9 +372,6 @@ def process_one_batch(i, output, batches, src, tqdm_tag: str | None = None):
             }
             f.write(json.dumps(item) + '\n')
             del item, func_depends, include_depends, other_depends, warnings
-            if func == 'ABRThandler':
-                import sys
-                sys.exit(0)
 
 BATCH_SIZE = 10
     
@@ -408,8 +405,6 @@ def main(src, func_list, output, start_batch, end_batch, split, batch_size):
             func_list.extend(batches[i])
         with open(output.replace('%r', f'{start_batch}_{end_batch}'), 'w') as f:
             for func in tqdm(func_list):
-                if func['name'] != 'ABRThandler':
-                    continue
                 func_depends, include_depends, other_depends, warnings = extract_func(clangd, os.path.join(src, func['file']), func['start_point'], func['name'])
                 item = {
                     'func': func,
