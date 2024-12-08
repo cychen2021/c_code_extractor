@@ -130,6 +130,8 @@ def _topo_sort(parents: dict[CodeItem, list[CodeItem]], all_items: list[CodeItem
     return result
 
 def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) -> tuple[list[CodeItemWithOrder], list[CodeItemWithOrder], list[CodeItemWithOrder], list[str]]:
+    if func_name != 'ABRThandler':
+        return [], [], [], []
     ast = aa.get_ast_of_func_exact_match(file, start_point, func_name)
     assert ast is not None
     
@@ -168,6 +170,7 @@ def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) 
             if item_semantic_token is not None and item_semantic_token['type'] == 'comment':
                 f = executor.submit(aa.cancel_macro, old_content, item.start_point, item.end_point)
                 refreshed_content = f.result()
+                clangd.refresh_file_content(item.file, refreshed_content)
             else:
                 refreshed_content = old_content
 
@@ -369,6 +372,9 @@ def process_one_batch(i, output, batches, src, tqdm_tag: str | None = None):
             }
             f.write(json.dumps(item) + '\n')
             del item, func_depends, include_depends, other_depends, warnings
+            if func == 'ABRThandler':
+                import sys
+                sys.exit(0)
 
 BATCH_SIZE = 10
     
