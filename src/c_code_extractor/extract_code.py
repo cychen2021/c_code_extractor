@@ -89,7 +89,7 @@ def main(src, output, function_depends_file):
                 case 'func':
                     assert isinstance(item.item, CodeLocation)
                     func_def_ast = get_ast_exact_match(item.item.file, item.item.start_point, item.item.end_point)
-                    assert func_def_ast is not None
+                    assert func_def_ast is not None, f'{item.item.file} {item.item.start_point} {item.item.end_point}'
                     content = 'extern ' + get_func_header_from_def(func_def_ast) + ';'
             contents.append(content)
         contents.insert(0, '\n'.join(includes))
