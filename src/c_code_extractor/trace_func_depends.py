@@ -161,24 +161,7 @@ def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) 
             old_content = f.read()
         item_semantic_token = clangd.get_semantic_token(item.file, item.start_point)
         if item_semantic_token is not None and item_semantic_token['type'] == 'comment':
-            to_cancel = cancel_macro(old_content, item.start_point, item.end_point)
-            if to_cancel is not None:
-                mask, to_erase = to_cancel
-                lines = old_content.split('\n')
-                for row in range(to_erase[0][0], to_erase[1][0] + 1):
-                    for column in range(0 if row != to_erase[0][0] else to_erase[0][1], 
-                                        len(lines[row]) if row != to_erase[1][0] else to_erase[1][1]):
-                        if not point_is_within((row, column), mask):
-                            lines[row] = lines[row][:column] + ' ' + lines[row][column+1:]
-                new_content = '\n'.join(lines)
-                with tempfile.NamedTemporaryFile('w', delete=False) as f:
-                    new_file = f.name
-                    f.write(new_content)
-                current = get_ast_exact_match(new_file, item.start_point, item.end_point)
-                assert current is not None
-                os.remove(new_file)
-                clangd.refresh_file_content(item.file, new_content)
-                refreshed_content = new_content
+            refreshed_content = cancel_macro(old_content, item.start_point, item.end_point)
         else:
             refreshed_content = old_content
 

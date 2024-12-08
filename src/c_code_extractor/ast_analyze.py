@@ -343,31 +343,31 @@ def get_macro_expanding_range(ast: Node, start_point: Point, end_point: Point) -
             break
     return (whole.start_point.row, whole.start_point.column), (whole.end_point.row, whole.end_point.column)
 
-def cancel_macro(file_content: str, start_point: Point, end_point: Point):
+def cancel_macro(file_content: str, start_point: Point, end_point: Point) -> str:
     parser = Parser(C_LANG)
     ast = parser.parse(file_content.encode())
-    return cancel_macro_in_ast(ast.root_node, start_point, end_point)
+    return cancel_macro_in_ast(ast.root_node, file_content, start_point, end_point)
 
-def cancel_macro_in_ast(ast: Node, start_point: Point, end_point: Point) -> tuple[tuple[Point, Point], tuple[Point, Point]] | None:
+def cancel_macro_in_ast(ast: Node, old_content, start_point: Point, end_point: Point) -> str:
     q2 = C_LANG.query(
-        r'((preproc_ifdef name: (_) . (_)* @enclosed . alternative: (preproc_else (_)*) .) @macro (#locate?))'
+        r'((preproc_ifdef name: (_) @name . (_)+ @enclosed . alternative: (preproc_else (_)*) .) @macro @ifdef (#locate?))'
     )
     q2_prime = C_LANG.query(
-        r'((preproc_if condition: (_) . (_)* . alternative: (preproc_else (_)* @enclosed) .) @macro (#locate?))'
+        r'((preproc_if condition: (_) @cond . (_)* . alternative: (preproc_else (_)+ @enclosed) .) @macro (#locate?))'
     )
     q3 = C_LANG.query(
-        r'((preproc_ifdef name: (_) . (_)* . alternative: (preproc_else (_)* @enclosed) .) @macro (#locate?))'
+        r'((preproc_ifdef name: (_) @name . (_)* . alternative: (preproc_else (_)+ @enclosed) .) @macro @ifdef (#locate?))'
     )
     q3_prime = C_LANG.query(
-        r'((preproc_if condition: (_) . (_)* @enclosed . alternative: (preproc_else (_)*) .) @macro (#locate?))'
+        r'((preproc_if condition: (_) @cond . (_)+ @enclosed . alternative: (preproc_else (_)*) .) @macro (#locate?))'
     )
 
     # Tree-sitter has a bug. An anchor at the end of the pattern causes missing matches.
     q1 = C_LANG.query(
-        r'((preproc_ifdef name: (_) . (_)* @enclosed) @macro (#locate?))'
+        r'((preproc_ifdef name: (_) @name . (_)+ @enclosed) @macro @ifdef (#locate?))'
     )
     q1_prime = C_LANG.query(
-        r'((preproc_if condition: (_) . (_)* @enclosed) @macro (#locate?))'
+        r'((preproc_if condition: (_) @cond . (_)+ @enclosed) @macro (#locate?))'
     )
     
     def get_range(nodes: list[Node]) -> tuple[Point, Point]:
@@ -387,33 +387,63 @@ def cancel_macro_in_ast(ast: Node, start_point: Point, end_point: Point) -> tupl
                 return is_within((start_point, end_point), enclosed_range)
             case _:
                 return True
+    matches1 = q1.matches(ast, predicate=locate)
+    matches1_prime = q1_prime.matches(ast, predicate=locate)
     matches2 = q2.matches(ast, predicate=locate)
     matches2_prime = q2_prime.matches(ast, predicate=locate)
     matches3 = q3.matches(ast, predicate=locate)
     matches3_prime = q3_prime.matches(ast, predicate=locate)
-    assert len(matches2) + len(matches2_prime) + len(matches3) + len(matches3_prime) <= 1
-    if len(matches2) == 1:
-        the_matches = matches2
-    elif len(matches2_prime) == 1:
-        the_matches = matches2_prime
-    elif len(matches3) == 1:
-        the_matches = matches3
-    elif len(matches3_prime) == 1:
-        the_matches = matches3_prime
-    else:
-        matches1 = q1.matches(ast, predicate=locate)
-        matches1_prime = q1_prime.matches(ast, predicate=locate)
-        assert len(matches1) + len(matches1_prime) <= 1
-        if len(matches1) == 1:
-            the_matches = matches1
-        elif len(matches1_prime) == 1:
-            the_matches = matches1_prime
-        else:
-            return None
+
+    new_content = old_content
+
+    if len(matches1) > 0:
+        for m in matches1:
+            ifdef_node = m[1]['ifdef'][0]
+            name_node = m[1]['name'][0]
+            ifdef_start = ifdef_node.start_byte
+            ifdef_end = name_node.end_byte
+            size = ifdef_end - ifdef_start
+            assert size >= 8
+            new_content = new_content[:ifdef_start] + '#if 1' + ' ' * (size - 5) + new_content[ifdef_end:]
+    if len(matches1_prime) > 0:
+        for m in matches1_prime:
+            cond_node = m[1]['cond'][0]
+            size = cond_node.end_byte - cond_node.start_byte
+            assert size >= 1
+            new_content = new_content[:cond_node.start_byte] + '1' + ' ' * (size - 1) + new_content[cond_node.end_byte:]
     
-    enclosed_nodes = the_matches[0][1]['enclosed']
-    enclosed_range = get_range(enclosed_nodes)
+    if len(matches2) > 0:
+        for m in matches2:
+            ifdef_node = m[1]['ifdef'][0]
+            name_node = m[1]['name'][0]
+            
+            # new_content = new_content[:ifdef_node.start_byte] + '' + new_content[ifdef_node.end_byte:]
+            ifdef_start = ifdef_node.start_byte
+            ifdef_end = name_node.end_byte
+            size = ifdef_end - ifdef_start
+            assert size >= 8
+            new_content = new_content[:ifdef_start] + '#if 1' + ' ' * (size - 5) + new_content[ifdef_end:]
+    if len(matches2_prime) > 0:
+        for m in matches2_prime:
+            cond_node = m[1]['cond'][0]
+            size = cond_node.end_byte - cond_node.start_byte
+            assert size >= 1
+            new_content = new_content[:cond_node.start_byte] + '1' + ' ' * (size - 1) + new_content[cond_node.end_byte:]
     
-    macro_node = the_matches[0][1]['macro'][0]
-    macro_range = (macro_node.start_point, macro_node.end_point)
-    return enclosed_range, macro_range
+
+    if len(matches3) > 0:
+        for m in matches3:
+            ifdef_node = m[1]['ifdef'][0]
+            name_node = m[1]['name'][0]
+            ifdef_start = ifdef_node.start_byte
+            ifdef_end = name_node.end_byte
+            size = ifdef_end - ifdef_start
+            assert size >= 8
+            new_content = new_content[:ifdef_start] + '#if 1' + ' ' * (size - 5) + new_content[ifdef_end:]
+    if len(matches3_prime) > 0:
+        for m in matches3_prime:
+            cond_node = m[1]['cond'][0]
+            size = cond_node.end_byte - cond_node.start_byte
+            assert size >= 1
+            new_content = new_content[:cond_node.start_byte] + '1' + ' ' * (size - 1) + new_content[cond_node.end_byte:]
+    return new_content
