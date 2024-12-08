@@ -315,7 +315,7 @@ def get_macro_expanding_range(ast: Node, start_point: Point, end_point: Point) -
             case _:
                 return True
     query1 = C_LANG.query(
-        r'((identifier) @macro @whole (#locate?))'
+        r'([(identifier) (null)] @macro @whole (#locate?))'
     )
     query2 = C_LANG.query(
         r'((call_expression function: (identifier) @macro) @whole (#locate?))'
@@ -336,7 +336,7 @@ def get_macro_expanding_range(ast: Node, start_point: Point, end_point: Point) -
     match_idices1 = set()
     for idx, _ in matches1:
         match_idices1.add(idx)
-    assert len(match_idices1) == 1
+    assert len(match_idices1) == 1, f'{matches1=}'
     for _, m in matches1:
         if 'whole' in m:
             whole = m['whole'][0]

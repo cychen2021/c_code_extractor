@@ -82,7 +82,7 @@ def map_range(content: str, new_content: str, mapping: dict[tuple[int, int], int
         if l <= offset < r:
             retval = Point(offset_to_line_column(offset + size_change, new_line_sizes))
             return retval
-    assert False, f'{point=}, {mapping=}'
+    assert False, f'{point=}, {offset=}, {mapping=}'
 
 def apply_edits_multiworld(context: str, edit_batches: Sequence[Sequence[Edit]]) -> Sequence[tuple[str, RangeMapping, RangeMapping]]:
     worlds = []
@@ -252,7 +252,7 @@ def extract_func(clangd: ClangD, file: str, start_point: Point, func_name: str) 
                     if code_item != root_item:
                         parents[code_item].add(item)
 
-                        if not macro_mode:
+                        if item.file == code_item.file and not macro_mode:
                             real_start_point = map_range(new_content, old_content, mapping_back, code_item.start_point)
                             real_end_point = map_range(new_content, old_content, mapping_back, code_item.end_point) 
                             code_item = CodeItem(code_item.kind, code_item.file, real_start_point, real_end_point, name=code_item.name)
@@ -366,15 +366,23 @@ def main(src, func_list, output, start_batch, end_batch, split):
                 }
                 f.write(json.dumps(item) + '\n')
                 del item, func_depends, include_depends, other_depends, warnings
-                assert False
     else:
+        from datetime import datetime
         # The code causes memory leak. Use a process to release the memory.
         with ProcessPoolExecutor(max_workers=1, max_tasks_per_child=1) as executor:
             all_bacthes = end_batch - start_batch + 1
+            start = datetime.now()
+            elapsed = 0
+            remaining = -1
             for i in range(start_batch, end_batch + 1):
                 batch_count = i - start_batch + 1
-                f = executor.submit(process_one_batch, i, output, batches, src, tqdm_tag=f'Batch {i} [{batch_count} / {all_bacthes}]')
+                f = executor.submit(process_one_batch, i, output, batches, src, 
+                                    tqdm_tag=f'({elapsed // 60} / {remaining // 60}) Batch {i} [{batch_count} / {all_bacthes}]')
                 f.result()
+                elapsed = (datetime.now() - start).seconds
+                
+                average = elapsed / (end_batch - start_batch + 1)
+                remaining = average * (end_batch - i)
             
         
 if __name__ == '__main__':
