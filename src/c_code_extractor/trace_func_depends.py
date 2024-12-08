@@ -79,7 +79,7 @@ def map_range(content: str, new_content: str, mapping: dict[tuple[int, int], int
     
     offset = line_column_to_offset(point[0], point[1], line_sizes)
     for (l, r), size_change in mapping.items():
-        if l <= offset < r:
+        if l <= offset <= r:
             retval = Point(offset_to_line_column(offset + size_change, new_line_sizes))
             return retval
     assert False, f'{point=}, {offset=}, {mapping=}'
