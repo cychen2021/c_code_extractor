@@ -87,6 +87,29 @@ def get_ast_of_func_exact_match(file_path: str, start_point: Point, name: str) -
     assert len(nl) == 1
     return nl[0]
 
+def get_ast_exact_match_str(content: str, start_point: Point, end_point: Point) -> Node | None:
+    parser = Parser(C_LANG)
+    ast = parser.parse(content.encode())
+    def locate(predicate, args, pattern_index, captures):
+        match predicate:
+            case 'locate?':
+                item_node: Node = captures['item'][0]
+                result = item_node.start_point.row == start_point[0] and item_node.start_point.column == start_point[1] \
+                    and item_node.end_point.row == end_point[0] and item_node.end_point.column == end_point[1]
+                return result
+            case _:
+                return True
+        
+    query = C_LANG.query(
+        r'((_) @item (#locate?))'
+    )
+    matches = query.matches(ast.root_node, predicate=locate)
+    if len(matches) == 0:
+        return None
+    nl = matches[0][1]['item']
+    assert len(nl) == 1
+    return nl[0]
+
 def get_ast_exact_match(file_path: str, start_point: Point, end_point: Point) -> Node | None:
     parser = Parser(C_LANG)
     with open(file_path, 'r') as f:
@@ -303,15 +326,23 @@ def collect_declaration_identifiers(node: Node) -> list[tuple[str, Point, Point]
                            (n.end_point.row, n.end_point.column)))
     return list(result)
 
-class NoAstError(Exception):
+class NoASTError(Exception):
     pass
 
 def leak_wrapper(function_name, ast_loc: tuple[str, Point, Point], *args, **kwargs):
     ast = get_ast_exact_match(*ast_loc)
     if ast is None:
-        raise NoAstError()
+        raise NoASTError()
     function = globals()[function_name]
     return function(ast, *args, **kwargs)
+
+def leaking_wrapper(function_name, content: str, start_point: Point, end_point: Point, *args, **kwargs):
+    ast = get_ast_exact_match_str(content, start_point, end_point)
+    if ast is None:
+        raise NoASTError()
+    function = globals()[function_name]
+    return function(ast, *args, **kwargs)
+
 
 def get_macro_expanding_range(ast: Node, start_point: Point, end_point: Point) -> tuple[Point, Point]:
     def locate(predicate, args, pattern_index, captures):

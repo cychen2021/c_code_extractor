@@ -37,6 +37,9 @@ class ClangD:
         for command in self.compilation_commands:
             self.lsp_server.notify_close(command['file'])
         self.lsp_server.stop()
+
+    def modified_files(self):
+        return self.lsp_server.modified_files()
     
     @staticmethod
     def _get_kind_name(kind):

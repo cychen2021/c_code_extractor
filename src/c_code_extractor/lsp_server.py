@@ -275,9 +275,13 @@ class LSPServer:
     
     def notify_close(self, file_name):
         self.notify("textDocument/didClose", {"textDocument": {"uri": path_to_uri(file_name)}})
-        if self.file_version[file_name] > 1:
-            with open(os.path.join(self.cwd, file_name), "w") as file:
-                file.write(self.original_content[file_name])
+    
+    def modified_files(self) -> dict[str, str]:
+        result = {}
+        for file_name, version in self.file_version.items():
+            if version > 1:
+                result[file_name] = self.original_content[file_name]
+        return result
         
     def compute_semantic_token_mapping(self, semantic_token_encoding) -> dict[tuple[int, int], dict[str, Any]]:
         assert len(semantic_token_encoding) % 5 == 0, f'{len(semantic_token_encoding)=}'
