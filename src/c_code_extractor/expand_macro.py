@@ -5,10 +5,14 @@ import click
 import os.path
 import json
 from tqdm import tqdm
+import copy
 
 
 def expand_all(clangd: ClangD, file: str, points: list[Point]) -> tuple[list[Point], list[str]]:
-    points, error_messages = expand_macro(clangd, file, points)
+    try:
+        points, error_messages = expand_macro(clangd, file, points)
+    except:
+        return points, [f'Error in expand_macro {points=}']
     return points, error_messages
 
 BATCH_SIZE = 10
@@ -31,16 +35,22 @@ def main(src, func_list, output, start_batch, end_batch, batch_size):
     if start_batch < 0 or start_batch >= batch_num or end_batch < 0 or end_batch >= batch_num:
         print(f'Invalid start_batch or end_batch')
         return
+    
+    all_func_list = sorted(all_func_list, key=lambda x: x['file'])
+    
     batches = [all_func_list[i*batch_size:(i+1)*batch_size] for i in range(batch_num)]
     if len(all_func_list) % batch_size != 0:
         batches[-1].extend(all_func_list[batch_num*batch_size:])
     
     file_map = {}
+    record = {}
     for func in all_func_list:
         file = os.path.join(src, func['file'])
         if file not in file_map:
             file_map[file] = []
+            record[file] = []
         file_map[file].append(func)
+        record[file].append(func['name'])
     
     acc_warnings = {}
     
@@ -66,24 +76,34 @@ def main(src, func_list, output, start_batch, end_batch, batch_size):
                         funcs.append(another_func)
                 points, warnings = expand_all(clangd, file, points)
 
-                for i in range(len(funcs)):
-                    funcs[i]['start_point'] = points[2*i]
-                    funcs[i]['end_point'] = points[2*i+1]
+                for j in range(len(funcs)):
+                    funcs[j]['start_point'] = points[2*j]
+                    funcs[j]['end_point'] = points[2*j+1]
                 
                 assert isinstance(func['file'], str)
                 assert isinstance(func['name'], str)
                 acc_warnings[(func['file'], func['name'])] = warnings
+                record[file].remove(func['name'])
                 pbar.update(1)
-    result = []
-    for _, funcs in file_map.items():
-        for func in funcs:
-            item = {
-                **func,
-                'warnings': acc_warnings[(func['file'], func['name'])]
-            }
-            result.append(item)
-    with open(output, 'w') as f:
-        json.dump(result, f, indent=2)
+            dumped = []
+            to_dump = []
+            for file in list(record.keys()):
+                if not record[file]:
+                    funcs = file_map[file]
+                    for func in funcs:
+                        item = {
+                            **func,
+                            'warnings': acc_warnings[(func['file'], func['name'])]
+                        }
+                        to_dump.append(item)
+                    record.pop(file)
+                    dumped.append(file)
+            if to_dump:
+                with open(output.replace('%r', str(i)), 'w') as f:
+                    for item in to_dump:
+                        f.write(json.dumps(item) + '\n')
+            print(f'Batch {i} dumped {'\n' + '\n'.join(dumped) if dumped else "nothing"}')
+            
 
 if __name__ == '__main__':
     main()

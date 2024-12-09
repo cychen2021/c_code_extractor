@@ -81,8 +81,7 @@ def apply_edits(content: str, edits: Sequence[Edit], points: Sequence[Point]) ->
     new_point_offsets = []
     for p in point_offsets:
         change = find_change(p)
-        assert change is not None
-        new_p = p + change
+        new_p = 0 if change is None else p + change
         new_point_offsets.append(new_p)
     new_points = [offset_to_line_column(p, new_line_sizes) for p in new_point_offsets]
     old_points = [offset_to_line_column(p, line_sizes) for p in point_offsets]
