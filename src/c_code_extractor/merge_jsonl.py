@@ -9,7 +9,10 @@ def main(output, input_pattern, range_):
     start_s, end_s = range_.split('..')
     result_lines = []
     for i in range(int(start_s), int(end_s) + 1):
-        with open(input_pattern.replace('%r', str(i))) as f:
+        file = input_pattern.replace('%r', str(i))
+        if not os.path.exists(file):
+            continue
+        with open(file) as f:
             content = f.read()
         lines = content.splitlines()
         result_lines.extend(lines)
