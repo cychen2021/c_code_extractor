@@ -31,6 +31,10 @@ def contain_leak(function_name: str, content_or_file: str, start_point: Point | 
             assert end_point is not None
             assert start_point is not None
             f = memory_container.submit(aa.cancel_macro, content_or_file, start_point, end_point)
+        case 'collect_type_and_identifiers_func':
+            assert start_point is not None
+            assert end_point is not None
+            f = memory_container.submit(aa.leaking_wrapper_func, 'collect_type_and_identifiers', content_or_file, start_point, end_point)
         case 'collect_type_and_identifiers_ultimate':
             assert start_point is None
             assert end_point is None
@@ -209,12 +213,15 @@ def expand_macro_ultimate(clangd: ClangD, file: str) -> list[str]:
                 clangd.refresh_file_content(file, new_content)
     return error_messages
 
-def trace_non_macro(clangd: ClangD, file: str, start_point: Point, end_point: Point) -> tuple[list[CodeItem], list[str]]:
+def trace_non_macro(clangd: ClangD, file: str, start_point: Point, end_point: Point, func_def: bool = False) -> tuple[list[CodeItem], list[str]]:
     error_messages = []
     with open(file, 'r') as f:
         content = f.read()
     try:
-        tokens = contain_leak('collect_type_and_identifiers', content, start_point, end_point)
+        if func_def:
+            tokens = contain_leak('collect_type_and_identifiers_func', content, start_point, end_point)
+        else:
+            tokens = contain_leak('collect_type_and_identifiers', content, start_point, end_point)
     except:
         print(f'Error for {file=}, {start_point=}, {end_point=}')
         raise
@@ -300,7 +307,7 @@ def trace_func(clangd: ClangD, file: str, func_name: str, start_point: Point) ->
     
     parents = {}
 
-    root_item = CodeItem('funcdef', file, (start_point[0], start_point[1]), (ast.end_point.row, ast.end_point.column), name=func_name)
+    root_item = CodeItem('init_func', file, (start_point[0], start_point[1]), (ast.end_point.row, ast.end_point.column), name=func_name)
     visited = set()
 
     MAX_NUM = 100
@@ -313,7 +320,7 @@ def trace_func(clangd: ClangD, file: str, func_name: str, start_point: Point) ->
         parent = parents.pop(current, None)
         if parent is not None:
             parents[current] = parent
-        code_items, messages = trace_non_macro(clangd, current.file, current.start_point, current.end_point)
+        code_items, messages = trace_non_macro(clangd, current.file, current.start_point, current.end_point, func_def=current.kind == 'funcdef')
         for message in messages:
             warnings.add(message)
             
@@ -325,8 +332,10 @@ def trace_func(clangd: ClangD, file: str, func_name: str, start_point: Point) ->
                     parents[code_item].add(current)
             match code_item.kind:
                 case 'funcdef':
+                    if code_item.start_point == root_item.start_point:
+                        continue
                     func_collect.add(code_item)
-                    continue
+                    # continue
                 case 'include_file':
                     include_collect.add(code_item)
                     continue
@@ -339,7 +348,6 @@ def trace_func(clangd: ClangD, file: str, func_name: str, start_point: Point) ->
                 match code_item.kind:
                     case 'funcdef':
                         func_collect.add(code_item)
-                        continue
                     case 'include_file':
                         include_collect.add(code_item)
                         continue

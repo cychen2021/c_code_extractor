@@ -227,11 +227,8 @@ def get_code_item(file_path: str, start_point: Point, end_point: Point) -> CodeI
     candidates = []
     if len(func_matches) > 0:
         func_match = func_matches[0]
-        # name_node = func_match[1]['name'][0]
-        # assert name_node.text is not None
         candidates.append(
             CodeItem('funcdef', file_path, func_match[1]['item'][0].start_point, func_match[1]['item'][0].end_point)
-                    #  name=name_node.text.decode())
         )
     if len(type_matches) > 0:
         type_match = type_matches[0]
@@ -390,6 +387,42 @@ def leaking_wrapper_ultimate(function_name, content: str, *args, **kwargs):
         raise NoASTError(start_point=None, end_point=None)
     function = globals()[function_name]
     return function(ast.root_node, *args, **kwargs)
+
+def leaking_wrapper_func(function_name, content: str, start_point: Point, end_point: Point, *args, **kwargs):
+    parser = Parser(C_LANG)
+    ast = parser.parse(content.encode())
+
+    query = C_LANG.query(
+        r'([(function_definition type: (_) @ty declarator: (_) @decl) (declaration type: (_) @ty declarator: (_) @decl)] @func (#locate?))'
+    )
+    
+    def locate(predicate, args, pattern_index, captures):
+        match predicate:
+            case 'locate?':
+                item_node: Node = captures['func'][0]
+                return is_within(
+                    (start_point, end_point),
+                    ((item_node.start_point.row, item_node.start_point.column), 
+                     (item_node.end_point.row, item_node.end_point.column))
+                )
+            case _:
+                return True
+    
+    matches = query.matches(ast.root_node, predicate=locate)
+    if len(matches) == 0:
+        raise NoASTError(start_point=start_point, end_point=end_point)
+    function = globals()[function_name]
+    result = []
+    for m in matches:
+        ty = m[1]['ty']
+        decl = m[1]['decl']
+        for t in ty:
+            r = function(t, *args, **kwargs)
+            result.extend(list(r))
+        for d in decl:
+            r = function(d, *args, **kwargs)
+            result.extend(list(r))
+    return result
 
 def leaking_wrapper_only_start(function_name, content: str, start_point: Point, *args, **kwargs):
     ast = get_ast_match_by_start(content, start_point)

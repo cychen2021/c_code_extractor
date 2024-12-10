@@ -1,9 +1,9 @@
 from typing import Literal
 
 class CodeItem:
-    def __init__(self, kind: Literal['typedef', 'funcdef', 'vardef', 'macrodef', 'include_file', 'macro_expand'], file: str,
+    def __init__(self, kind: Literal['init_func', 'typedef', 'funcdef', 'vardef', 'macrodef', 'include_file', 'macro_expand'], file: str,
                  start_point: tuple[int, int] = (-1, -1), end_point: tuple[int, int] = (-1, -1), name: str | None = None):
-        self.kind: Literal['typedef', 'funcdef', 'vardef', 'macrodef', 'include_file', 'macro_expand'] = kind
+        self.kind: Literal['init_func', 'typedef', 'funcdef', 'vardef', 'macrodef', 'include_file', 'macro_expand'] = kind
         self.name = name
         self.file = file
         self.start_point = start_point
