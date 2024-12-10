@@ -276,6 +276,18 @@ def collect_calls(node: Node) -> list[tuple[str, Point, Point]]:
     return result
 
 def collect_types(node: Node) -> list[tuple[str, Point, Point]]:
+    preproc_exps = C_LANG.query(
+        r'[(preproc_if condition: (_) @exp) (preproc_ifdef name: (_) @exp) (preproc_def (_) @exp) (preproc_function_def (_) @exp)]'
+    )
+    
+    matches = preproc_exps.matches(node)
+    exclude = set()
+    for m in matches:
+        nodes = m[1]['exp']
+        for n in nodes:
+            assert n.text is not None
+            exclude.add(((n.start_point.row, n.start_point.column), (n.end_point.row, n.end_point.column)))
+    
     query = C_LANG.query(
         r'[(type_identifier) (primitive_type)]@ty'
     )
@@ -285,6 +297,8 @@ def collect_types(node: Node) -> list[tuple[str, Point, Point]]:
         nodes = m[1]['ty']
         for n in nodes:
             assert n.text is not None
+            if ((n.start_point.row, n.start_point.column), (n.end_point.row, n.end_point.column)) in exclude:
+                continue
             result.append((n.text.decode(), 
                            (n.start_point.row, n.start_point.column), 
                            (n.end_point.row, n.end_point.column)))
@@ -294,6 +308,23 @@ def collect_type_and_identifiers(node: Node) -> list[tuple[str, Point, Point]]:
     return collect_types(node) + collect_identifiers(node)
 
 def collect_identifiers(node: Node) -> list[tuple[str, Point, Point]]:
+    preproc_exps = C_LANG.query(
+        r'''[(preproc_if condition: (_) @exp) 
+             (preproc_elif condition: (_) @exp)
+             (preproc_ifdef name: (_) @exp) 
+             (preproc_elifdef name: (_) @exp) 
+             (preproc_def (_) @exp) 
+             (preproc_function_def (_) @exp)]'''
+    )
+    
+    matches = preproc_exps.matches(node)
+    exclude = set()
+    for m in matches:
+        nodes = m[1]['exp']
+        for n in nodes:
+            assert n.text is not None
+            exclude.add(((n.start_point.row, n.start_point.column), (n.end_point.row, n.end_point.column)))
+
     query = C_LANG.query(
         r'[(identifier) (null)]@id'
     )
@@ -302,6 +333,8 @@ def collect_identifiers(node: Node) -> list[tuple[str, Point, Point]]:
     for m in matches:
         nodes = m[1]['id']
         for n in nodes:
+            if ((n.start_point.row, n.start_point.column), (n.end_point.row, n.end_point.column)) in exclude:
+                continue
             assert n.text is not None
             result.append((n.text.decode(), 
                            (n.start_point.row, n.start_point.column), 
@@ -328,26 +361,40 @@ def collect_declaration_identifiers(node: Node) -> list[tuple[str, Point, Point]
     return list(result)
 
 class NoASTError(Exception):
-    pass
+    def __init__(self, start_point=None, end_point=None) -> None:
+        self.start_point = start_point
+        self.end_point = end_point
+    def __repr__(self) -> str:
+        return f'No AST found for {self.start_point=}, {self.end_point=}'
+    def __str__(self) -> str:
+        return self.__repr__()
 
 def leak_wrapper(function_name, ast_loc: tuple[str, Point, Point], *args, **kwargs):
     ast = get_ast_exact_match(*ast_loc)
     if ast is None:
-        raise NoASTError()
+        raise NoASTError(ast_loc[1], ast_loc[2])
     function = globals()[function_name]
     return function(ast, *args, **kwargs)
 
-def leaking_wrapper(function_name, content: str, start_point: Point, end_point: Point, *args, **kwargs):
-    ast = get_ast_exact_match_str(content, start_point, end_point)
+def leaking_wrapper_fuzzy(function_name, content: str, start_point: Point, end_point: Point, *args, **kwargs):
+    ast = get_ast_match_fuzzy(content, start_point, end_point)
     if ast is None:
-        raise NoASTError()
+        raise NoASTError(start_point=start_point, end_point=end_point)
     function = globals()[function_name]
     return function(ast, *args, **kwargs)
+
+def leaking_wrapper_ultimate(function_name, content: str, *args, **kwargs):
+    parser = Parser(C_LANG)
+    ast = parser.parse(content.encode())
+    if ast is None:
+        raise NoASTError(start_point=None, end_point=None)
+    function = globals()[function_name]
+    return function(ast.root_node, *args, **kwargs)
 
 def leaking_wrapper_only_start(function_name, content: str, start_point: Point, *args, **kwargs):
     ast = get_ast_match_by_start(content, start_point)
     if ast is None:
-        raise NoASTError()
+        raise NoASTError(start_point=start_point, end_point=None)
     function = globals()[function_name]
     return function(ast, *args, **kwargs)
 
@@ -380,6 +427,37 @@ def get_ast_match_by_start(content: str, start_point: Point) -> Node | None:
         matches_with_offset.append((offset, item_node))
     matches_with_offset.sort(key=lambda x: x[0], reverse=True)
     r = matches_with_offset[0][1]
+    return r
+
+def get_ast_match_fuzzy(content: str, start_point: Point, end_point: Point) -> Node | None:
+    parser = Parser(C_LANG)
+    ast = parser.parse(content.encode())
+    def locate(predicate, args, pattern_index, captures):
+        match predicate:
+            case 'locate?':
+                item_node: Node = captures['item'][0]
+                if start_point[0] - 5 <= item_node.start_point.row <= start_point[0] + 5 and \
+                   end_point[0] - 20 <= item_node.end_point.row <= end_point[0] + 20:
+                    return True
+                return False
+            case _:
+                return True
+        
+    query = C_LANG.query(
+        r'((_) @item (#locate?))'
+    )
+    matches = query.matches(ast.root_node, predicate=locate)
+    if len(matches) == 0:
+        print('FUCK')
+        return None
+
+    matches_with_line_num = []
+    for m in matches:
+        item_node = m[1]['item'][0]
+        line_num = item_node.end_point.row - item_node.start_point.row
+        matches_with_line_num.append((line_num, item_node))
+    matches_with_line_num.sort(key=lambda x: x[0], reverse=True)
+    r = matches_with_line_num[0][1]
     return r
 
 

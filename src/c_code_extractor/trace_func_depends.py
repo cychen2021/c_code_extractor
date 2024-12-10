@@ -21,20 +21,27 @@ def line_column_to_offset(line: int, column: int, line_sizes: Sequence[int]) -> 
 def cancel_macro(content: str, start_point: Point, end_point: Point) -> str:
     return contain_leak('cancel_macro', content, start_point, end_point)
 
-def contain_leak(function_name: str, content_or_file: str, start_point: Point, end_point: Point | None = None) -> Any:
+def contain_leak(function_name: str, content_or_file: str, start_point: Point | None=None, end_point: Point | None = None) -> Any:
     match function_name:
         case 'get_code_item':
             assert end_point is not None
+            assert start_point is not None
             f = memory_container.submit(aa.get_code_item, content_or_file, start_point, end_point)
         case 'cancel_macro':
             assert end_point is not None
+            assert start_point is not None
             f = memory_container.submit(aa.cancel_macro, content_or_file, start_point, end_point)
+        case 'collect_type_and_identifiers_ultimate':
+            assert start_point is None
+            assert end_point is None
+            f = memory_container.submit(aa.leaking_wrapper_ultimate, 'collect_type_and_identifiers', content_or_file)
         case _:
+            assert start_point is not None
             match end_point:
                 case None:
                     f = memory_container.submit(aa.leaking_wrapper_only_start, function_name, content_or_file, start_point)
                 case _:
-                    f = memory_container.submit(aa.leaking_wrapper, function_name, content_or_file, start_point, end_point)
+                    f = memory_container.submit(aa.leaking_wrapper_fuzzy, function_name, content_or_file, start_point, end_point)
     return f.result()
 
 def apply_edits(content: str, edits: Sequence[Edit], points: Sequence[Point]) -> tuple[str, Sequence[Point]]:
@@ -114,8 +121,7 @@ def __expand_macro(clangd: ClangD, file: str, points: list[Point]) -> MacroExpan
     with open(file, 'r') as f:
         content = f.read()
     try:
-        # tokens = contain_leak('collect_type_and_identifiers', content, points[0], points[1])
-        tokens = contain_leak('collect_type_and_identifiers', content, points[0])
+        tokens = contain_leak('collect_type_and_identifiers', content, points[0], points[1])
     except:
         print(f'Error for {file=}, {points=}')
         raise
@@ -140,6 +146,35 @@ def __expand_macro(clangd: ClangD, file: str, points: list[Point]) -> MacroExpan
         return MacroExpansionResult('err', error_messages=error_messages)
     return MacroExpansionResult('halt')
 
+def __expand_macro_ultimate(clangd: ClangD, file: str) -> MacroExpansionResult:
+    with open(file, 'r') as f:
+        content = f.read()
+    try:
+        tokens = contain_leak('collect_type_and_identifiers_ultimate', content)
+    except:
+        print(f'Error for {file=}')
+        raise
+    macros: list[tuple[str, Point, Point]] = []
+    for token in tokens:
+        assert isinstance(token, tuple)
+        semantic_token = clangd.get_semantic_token(file, token[1])
+        if semantic_token is None:
+            continue
+        kind = semantic_token['type']
+        if kind == 'macro':
+            macros.append(token)
+    macros = random_permutation(macros)
+    error_messages = []
+    for _, macro_start, macro_end in macros:
+        edits = clangd.get_macro_expansion(file, macro_start, macro_end)
+        new_content, new_points = apply_edits(content, edits, [])
+        if new_content == content:
+            continue
+        return MacroExpansionResult('ok', result=(new_content, list(new_points)))
+    if error_messages:
+        return MacroExpansionResult('err', error_messages=error_messages)
+    return MacroExpansionResult('halt')
+
 def expand_macro(clangd: ClangD, file: str, points: list[Point]) -> tuple[list[Point], list[str]]:
     error_messages = []
     while True:
@@ -156,6 +191,23 @@ def expand_macro(clangd: ClangD, file: str, points: list[Point]) -> tuple[list[P
                 new_content, points = expand_result.result
                 clangd.refresh_file_content(file, new_content)
     return points, error_messages
+
+def expand_macro_ultimate(clangd: ClangD, file: str) -> list[str]:
+    error_messages = []
+    while True:
+        expand_result = __expand_macro_ultimate(clangd, file)
+        match expand_result.kind:
+            case 'halt':
+                break
+            case 'err':
+                assert expand_result.error_message is not None
+                error_messages.extend(expand_result.error_message)
+                break
+            case 'ok':
+                assert expand_result.result is not None
+                new_content, points = expand_result.result
+                clangd.refresh_file_content(file, new_content)
+    return error_messages
 
 def trace_non_macro(clangd: ClangD, file: str, start_point: Point, end_point: Point) -> tuple[list[CodeItem], list[str]]:
     error_messages = []
