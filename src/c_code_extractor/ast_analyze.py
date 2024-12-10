@@ -2,6 +2,7 @@ from tree_sitter import Parser, Language, Node
 import tree_sitter_c as tsc
 from code_item import CodeItem
 from functools import cmp_to_key
+from util import *
 
 Point = tuple[int, int]
 C_LANG = Language(tsc.language())
@@ -342,6 +343,44 @@ def leaking_wrapper(function_name, content: str, start_point: Point, end_point: 
         raise NoASTError()
     function = globals()[function_name]
     return function(ast, *args, **kwargs)
+
+def leaking_wrapper_only_start(function_name, content: str, start_point: Point, *args, **kwargs):
+    ast = get_ast_match_by_start(content, start_point)
+    if ast is None:
+        raise NoASTError()
+    function = globals()[function_name]
+    return function(ast, *args, **kwargs)
+
+def get_ast_match_by_start(content: str, start_point: Point) -> Node | None:
+    parser = Parser(C_LANG)
+    ast = parser.parse(content.encode())
+    def locate(predicate, args, pattern_index, captures):
+        match predicate:
+            case 'locate?':
+                item_node: Node = captures['item'][0]
+                if item_node.start_point.row == start_point[0] - 1 or \
+                   item_node.start_point.row == start_point[0] and item_node.start_point.column <= start_point[1]:
+                    return True
+                return False
+            case _:
+                return True
+        
+    query = C_LANG.query(
+        r'((_) @item (#locate?))'
+    )
+    matches = query.matches(ast.root_node, predicate=locate)
+    if len(matches) == 0:
+        return None
+
+    line_sizes = [len(line) + 1 for line in content.split('\n')]
+    matches_with_offset = []
+    for m in matches:
+        item_node = m[1]['item'][0]
+        offset = line_column_to_offset(item_node.start_point.row, item_node.start_point.column, line_sizes)
+        matches_with_offset.append((offset, item_node))
+    matches_with_offset.sort(key=lambda x: x[0], reverse=True)
+    r = matches_with_offset[0][1]
+    return r
 
 
 def get_macro_expanding_range(ast: Node, start_point: Point, end_point: Point) -> tuple[Point, Point]:

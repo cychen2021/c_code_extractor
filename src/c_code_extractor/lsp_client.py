@@ -58,8 +58,9 @@ class ClangD:
                 assert False, f'Unknown kind: {kind}'
     def get_semantic_tokens_in_file(self, file: str) -> dict[tuple[int, int], dict[str, Any]]:
         if file not in self.semantic_tokens_mapping:
-            response = self.lsp_server.request_semantic_tokens(file)['result']
-            mapping = self.lsp_server.compute_semantic_token_mapping(response['data'])
+            response = self.lsp_server.request_semantic_tokens(file)
+            result = response['result']
+            mapping = self.lsp_server.compute_semantic_token_mapping(result['data'])
             self.semantic_tokens_mapping[file] = mapping
         return self.semantic_tokens_mapping[file]
 

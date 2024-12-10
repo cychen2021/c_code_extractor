@@ -12,7 +12,9 @@ def expand_all(clangd: ClangD, file: str, points: list[Point]) -> tuple[list[Poi
     try:
         points, error_messages = expand_macro(clangd, file, points)
     except:
-        return points, [f'Error in expand_macro {points=}']
+        # return points, [f'Error in expand_macro {points=}']
+        print(f'Error in expand_macro {points=}')
+        raise
     return points, error_messages
 
 BATCH_SIZE = 10
@@ -65,20 +67,20 @@ def main(src, func_list, output, start_batch, end_batch, batch_size):
                 file = os.path.join(src, func['file'])
                 
                 start_point = Point(func['start_point'])
-                end_point = Point(func['end_point'])
+                # end_point = Point(func['end_point'])
                 
-                points = [start_point, end_point]
+                points = [start_point]
                 funcs = [func]
                 for another_func in file_map[file]:
                     if another_func != func:
                         points.append(Point(another_func['start_point']))
-                        points.append(Point(another_func['end_point']))
+                        # points.append(Point(another_func['end_point']))
                         funcs.append(another_func)
                 points, warnings = expand_all(clangd, file, points)
 
                 for j in range(len(funcs)):
-                    funcs[j]['start_point'] = points[2*j]
-                    funcs[j]['end_point'] = points[2*j+1]
+                    funcs[j]['start_point'] = points[j]
+                    # funcs[j]['end_point'] = points[2*j+1]
                 
                 assert isinstance(func['file'], str)
                 assert isinstance(func['name'], str)

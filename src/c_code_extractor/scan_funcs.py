@@ -11,16 +11,20 @@ LINE_NUM_THREASHOLD=100
 @click.option('--src', '-i', type=click.Path(exists=True, dir_okay=True, file_okay=False), help='Path to the source file')
 @click.option('--output', '-o', type=click.Path(exists=False, dir_okay=False, file_okay=True), 
               help='Output file for the extracted code', default='callgraph.json')
-@click.option('--exclude-header/--include-header', '-e/-I', is_flag=True, 
-              help='Path to the file containing the list of header files to exclude', default=True)
-def main(src, output, exclude_header):
+@click.option('--compile-commands', '-c', type=click.Path(exists=True, dir_okay=True, file_okay=False), default=None)
+@click.option('--exclude-header/--include-header', '-e/-I', is_flag=True, default=True)
+def main(src, output, exclude_header, compile_commands):
+    if compile_commands is None:
+        compile_commands = os.path.join(src, 'compile_commands.json')
+    
+    with open(compile_commands, 'r') as f:
+        compile_commands = json.load(f)
+    
     all_files = []
-    for p, ds, fs in os.walk(src):
-        for f in fs:
-            if f.endswith('.c'):
-                all_files.append(os.path.join(p, f))
-            if not exclude_header and f.endswith('.h'):
-                all_files.append(os.path.join(p, f))
+    for command in compile_commands:
+        file_path = command['file']
+        if file_path.endswith('.c') or (not exclude_header and file_path.endswith('.h')):
+            all_files.append(file_path)
     results = []
     count = 0
     for f in tqdm(all_files):

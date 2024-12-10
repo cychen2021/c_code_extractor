@@ -8,6 +8,7 @@ from lsp_client import ClangD, Edit
 import random
 from typing import Sequence, Literal, Any
 import os.path
+from util import *
 
 memory_container = ProcessPoolExecutor(max_workers=1, max_tasks_per_child=1)
 
@@ -17,24 +18,23 @@ def random_permutation[T](items: list[T]) -> list[T]:
 def line_column_to_offset(line: int, column: int, line_sizes: Sequence[int]) -> int:
     return sum(line_sizes[:line]) + column
 
-def offset_to_line_column(offset: int, line_sizes: Sequence[int]) -> tuple[int, int]:
-    line = 0
-    while line < len(line_sizes) and offset >= line_sizes[line]:
-        offset -= line_sizes[line]
-        line += 1
-    return line, offset
-
 def cancel_macro(content: str, start_point: Point, end_point: Point) -> str:
     return contain_leak('cancel_macro', content, start_point, end_point)
 
-def contain_leak(function_name: str, content_or_file: str, start_point: Point, end_point: Point) -> Any:
+def contain_leak(function_name: str, content_or_file: str, start_point: Point, end_point: Point | None = None) -> Any:
     match function_name:
         case 'get_code_item':
+            assert end_point is not None
             f = memory_container.submit(aa.get_code_item, content_or_file, start_point, end_point)
         case 'cancel_macro':
+            assert end_point is not None
             f = memory_container.submit(aa.cancel_macro, content_or_file, start_point, end_point)
         case _:
-            f = memory_container.submit(aa.leaking_wrapper, function_name, content_or_file, start_point, end_point)
+            match end_point:
+                case None:
+                    f = memory_container.submit(aa.leaking_wrapper_only_start, function_name, content_or_file, start_point)
+                case _:
+                    f = memory_container.submit(aa.leaking_wrapper, function_name, content_or_file, start_point, end_point)
     return f.result()
 
 def apply_edits(content: str, edits: Sequence[Edit], points: Sequence[Point]) -> tuple[str, Sequence[Point]]:
@@ -73,9 +73,16 @@ def apply_edits(content: str, edits: Sequence[Edit], points: Sequence[Point]) ->
     new_line_sizes = [len(l) + 1 for l in result_content.split('\n')]
     
     def find_change(offset: int) -> int | None:
+        last_end = 0
+        last_change = 0
         for start, end, change in mapping:
             if start <= offset < end:
                 return change
+            if last_end <= offset < start:
+                new_last_end = last_end + change
+                return new_last_end - offset # Offset contained in a change will be mapped to the beginning of the change
+            last_end = end
+            last_change = change
         return None
     
     new_point_offsets = []
@@ -107,7 +114,8 @@ def __expand_macro(clangd: ClangD, file: str, points: list[Point]) -> MacroExpan
     with open(file, 'r') as f:
         content = f.read()
     try:
-        tokens = contain_leak('collect_type_and_identifiers', content, points[0], points[1])
+        # tokens = contain_leak('collect_type_and_identifiers', content, points[0], points[1])
+        tokens = contain_leak('collect_type_and_identifiers', content, points[0])
     except:
         print(f'Error for {file=}, {points=}')
         raise
@@ -253,8 +261,6 @@ def trace_func(clangd: ClangD, file: str, func_name: str, start_point: Point) ->
         parent = parents.pop(current, None)
         if parent is not None:
             parents[current] = parent
-        for message in messages:
-            warnings.add(message)
         code_items, messages = trace_non_macro(clangd, current.file, current.start_point, current.end_point)
         for message in messages:
             warnings.add(message)
