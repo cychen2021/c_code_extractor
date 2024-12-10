@@ -13,11 +13,13 @@ LINE_NUM_THREASHOLD=100
               help='Output file for the extracted code', default='callgraph.json')
 @click.option('--exclude-header/--include-header', '-e/-I', is_flag=True, 
               help='Path to the file containing the list of header files to exclude', default=True)
-def main(src, output):
+def main(src, output, exclude_header):
     all_files = []
     for p, ds, fs in os.walk(src):
         for f in fs:
             if f.endswith('.c'):
+                all_files.append(os.path.join(p, f))
+            if not exclude_header and f.endswith('.h'):
                 all_files.append(os.path.join(p, f))
     results = []
     count = 0
