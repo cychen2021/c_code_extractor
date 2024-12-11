@@ -297,6 +297,10 @@ def trace(clangd: ClangD, file: str, start_point: Point, end_point: Point, func_
             continue
         
         code_item: CodeItem = contain_leak('get_code_item', def_file, ref_start_point, ref_end_point)
+        if code_item is None:
+            warning = f'Error for {def_file=}, {ref_start_point=}, {ref_end_point=}'
+            error_messages.append(warning)
+            continue
         if code_item.kind == 'macrodef':
             warning = f'Code item is a macro definition {code_item}, {file=}, {start_point=}, {end_point=}'
             error_messages.append(warning)
@@ -448,9 +452,9 @@ def main(src, func_list, output, start_batch, end_batch, batch_size, manually_re
     all_num = sum(len(batch) for batch in working_batches)
     print(f'{start_batch}-{end_batch} / {batch_num - 1}')
     with tqdm(total=all_num) as pbar:
-        for i, batch in enumerate(batches):
-            output_file = output.replace('%r', str(i))
-            pbar.desc = f'Batch {i} / {batch_num - 1}'
+        for i, batch in enumerate(working_batches):
+            output_file = output.replace('%r', str(i + start_batch))
+            pbar.desc = f'Batch {i + start_batch} / {batch_num - 1}'
             with open(output_file, 'w') as f:
                 for func in batch:
                     file = os.path.join(src, func['file'])

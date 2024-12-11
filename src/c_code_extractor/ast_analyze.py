@@ -205,6 +205,7 @@ def get_code_item(file_path: str, start_point: Point, end_point: Point) -> CodeI
         r'((declaration) @item (#locate?))'
     )
     
+    # Comments in the macro def will cause missing matches. It is a bug of tree-sitter C grammar. Fix it if necessary.
     query_macro = C_LANG.query(
         r'([(preproc_def) (preproc_function_def)] @item (#locate?))'
     )
