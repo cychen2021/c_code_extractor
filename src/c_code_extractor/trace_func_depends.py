@@ -1,5 +1,5 @@
 import ast_analyze as aa
-from ast_analyze import NoASTError, Point
+from ast_analyze import NoASTError, Point, point_is_within
 from concurrent.futures import ProcessPoolExecutor
 from defs import PROJECT_ROOT
 from lsp_server import uri_to_path
@@ -45,7 +45,7 @@ def contain_leak(function_name: str, content_or_file: str, start_point: Point | 
                 case None:
                     f = memory_container.submit(aa.leaking_wrapper_only_start, function_name, content_or_file, start_point)
                 case _:
-                    f = memory_container.submit(aa.leaking_wrapper_fuzzy, function_name, content_or_file, start_point, end_point)
+                    f = memory_container.submit(aa.leaking_wrapper, function_name, content_or_file, start_point, end_point)
     return f.result()
 
 def apply_edits(content: str, edits: Sequence[Edit], points: Sequence[Point]) -> tuple[str, Sequence[Point]]:
@@ -213,7 +213,9 @@ def expand_macro_ultimate(clangd: ClangD, file: str) -> list[str]:
                 clangd.refresh_file_content(file, new_content)
     return error_messages
 
-def trace_non_macro(clangd: ClangD, file: str, start_point: Point, end_point: Point, func_def: bool = False) -> tuple[list[CodeItem], list[str]]:
+DEBUG = False
+
+def trace(clangd: ClangD, file: str, start_point: Point, end_point: Point, func_def: bool = False) -> tuple[list[CodeItem], list[str]]:
     error_messages = []
     with open(file, 'r') as f:
         content = f.read()
@@ -225,23 +227,23 @@ def trace_non_macro(clangd: ClangD, file: str, start_point: Point, end_point: Po
     except:
         print(f'Error for {file=}, {start_point=}, {end_point=}')
         raise
-    identifiers: list[tuple[str, Point, Point]] = []
+    identifiers: list[tuple[str, Point, Point]] = tokens
     result = []
-    for token in tokens:
-        assert isinstance(token, tuple)
-        semantic_token = clangd.get_semantic_token(file, token[1])
-        if semantic_token is None:
-            continue
-        kind = semantic_token['type']
-        if kind != 'macro':
-            identifiers.append(token)
     for identifier in identifiers:
+        if identifier[0] in {'int', 'char', 'float', 'double', 'void', 'long', 'short', 'signed', 'unsigned'}:
+            continue
+        match identifier[0]:
+            case 'size_t':
+                code_item = CodeItem('include_file', 'stddef.h')
+                result.append(code_item)
+                continue
         start_point, end_point = identifier[1], identifier[2]
         defs = clangd.get_definition(file, start_point[0], start_point[1])
         if not defs:
-            error_messages.append(f'Failed to find definition for {identifier}, {file=}')
+            if DEBUG:
+                error_messages.append(f'Failed to find definition for {identifier}, {file=}')
             continue
-        if len(defs) > 1:
+        if len(defs) > 1 and DEBUG:
             error_messages.append(f'Multiple definitions for {identifier}, {file=}')
         def_ = defs[0]
         def_file = uri_to_path(def_['uri'])
@@ -254,6 +256,10 @@ def trace_non_macro(clangd: ClangD, file: str, start_point: Point, end_point: Po
 
         ref_start_point = (def_['range']['start']['line'], def_['range']['start']['character'])
         ref_end_point = (def_['range']['end']['line'], def_['range']['end']['character'])
+
+        if def_file == file and point_is_within(ref_start_point, (start_point, end_point)):
+            continue
+        
         code_item: CodeItem = contain_leak('get_code_item', def_file, ref_start_point, ref_end_point)
         if code_item.kind == 'macrodef':
             warning = f'Code item is a macro definition {code_item}, {file=}, {start_point=}, {end_point=}'
@@ -320,22 +326,20 @@ def trace_func(clangd: ClangD, file: str, func_name: str, start_point: Point) ->
         parent = parents.pop(current, None)
         if parent is not None:
             parents[current] = parent
-        code_items, messages = trace_non_macro(clangd, current.file, current.start_point, current.end_point, func_def=current.kind == 'funcdef')
+        code_items, messages = trace(clangd, current.file, current.start_point, current.end_point, func_def=current.kind == 'funcdef')
         for message in messages:
             warnings.add(message)
             
         for code_item in code_items:
-            if code_item != root_item:
-                if code_item not in parents:
-                    parents[code_item] = set()
-                if current != code_item:
-                    parents[code_item].add(current)
+            if code_item.start_point == root_item.start_point or code_item == current:
+                continue
+            if code_item not in parents:
+                parents[code_item] = set()
+            # if current != code_item:
+            parents[code_item].add(current)
             match code_item.kind:
                 case 'funcdef':
-                    if code_item.start_point == root_item.start_point:
-                        continue
                     func_collect.add(code_item)
-                    # continue
                 case 'include_file':
                     include_collect.add(code_item)
                     continue
@@ -344,16 +348,7 @@ def trace_func(clangd: ClangD, file: str, func_name: str, start_point: Point) ->
             if len(func_collect) + len(include_collect) + len(other_collect) > MAX_NUM:
                 warnings.add(f'Exceed maximum number of items {MAX_NUM}')
                 break
-            for code_item in code_items:
-                match code_item.kind:
-                    case 'funcdef':
-                        func_collect.add(code_item)
-                    case 'include_file':
-                        include_collect.add(code_item)
-                        continue
-                    case _:
-                        other_collect.add(code_item)
-                worklist.append(code_item)
+            worklist.append(code_item)
     assert root_item not in parents
     parents[root_item] = set()
     for item, the_parents in parents.items():
@@ -407,7 +402,7 @@ def main(src, func_list, output, start_batch, end_batch, batch_size):
         for i, batch in enumerate(batches):
             output_file = output.replace('%r', str(i))
             pbar.desc = f'Batch {i} / {batch_num - 1}'
-            with open(output_file, 'a') as f:
+            with open(output_file, 'w') as f:
                 for func in batch:
                     file = os.path.join(src, func['file'])
                     start_point = Point(func['start_point'])
@@ -421,6 +416,7 @@ def main(src, func_list, output, start_batch, end_batch, batch_size):
                         'warnings': warnings
                     }
                     f.write(json.dumps(item) + '\n')
+                    f.flush()
                     pbar.update(1)
 
 if __name__ == '__main__':

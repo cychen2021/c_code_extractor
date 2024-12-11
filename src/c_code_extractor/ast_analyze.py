@@ -274,7 +274,12 @@ def collect_calls(node: Node) -> list[tuple[str, Point, Point]]:
 
 def collect_types(node: Node) -> list[tuple[str, Point, Point]]:
     preproc_exps = C_LANG.query(
-        r'[(preproc_if condition: (_) @exp) (preproc_ifdef name: (_) @exp) (preproc_def (_) @exp) (preproc_function_def (_) @exp)]'
+        r'''[(preproc_if condition: (_) @exp) 
+             (preproc_elif condition: (_) @exp) 
+             (preproc_ifdef name: (_) @exp) 
+             (preproc_elifdef name: (_) @exp) 
+             (preproc_def (_) @exp) 
+             (preproc_function_def (_) @exp)]'''
     )
     
     matches = preproc_exps.matches(node)
@@ -373,12 +378,13 @@ def leak_wrapper(function_name, ast_loc: tuple[str, Point, Point], *args, **kwar
     function = globals()[function_name]
     return function(ast, *args, **kwargs)
 
-def leaking_wrapper_fuzzy(function_name, content: str, start_point: Point, end_point: Point, *args, **kwargs):
-    ast = get_ast_match_fuzzy(content, start_point, end_point)
+def leaking_wrapper(function_name, content: str, start_point: Point, end_point: Point, *args, **kwargs):
+    ast = get_ast_exact_match_str(content, start_point, end_point)
     if ast is None:
         raise NoASTError(start_point=start_point, end_point=end_point)
     function = globals()[function_name]
-    return function(ast, *args, **kwargs)
+    r = function(ast, *args, **kwargs)
+    return r
 
 def leaking_wrapper_ultimate(function_name, content: str, *args, **kwargs):
     parser = Parser(C_LANG)

@@ -50,6 +50,8 @@ def main(src, output, function_depends_file):
         for line in f:
             item = json.loads(line)
             function_depends.append(item)
+
+    func_name_repeat = {}
     for item in tqdm(function_depends):
         func_name = item['func']['name']
         to_merge = [
@@ -74,7 +76,14 @@ def main(src, output, function_depends_file):
             to_merge.append((order, MergeItem('func', CodeLocation(code_item['file'], start_point, end_point))))
         to_merge.sort(key=lambda x: x[0], reverse=True)
         slice_ = Slice(func_name, [x[1] for x in to_merge])
-        os.makedirs(os.path.join(output, func_name), exist_ok=True)
+        
+        if func_name in func_name_repeat:
+            func_name_repeat[func_name] += 1
+            dir_name = f'{func_name}_{func_name_repeat[func_name]}'
+        else:
+            func_name_repeat[func_name] = 0
+            dir_name = func_name
+        os.makedirs(os.path.join(output, dir_name), exist_ok=True)
         includes = set()
         contents = []
         for item in slice_.to_merge:
@@ -93,7 +102,7 @@ def main(src, output, function_depends_file):
                     content = 'extern ' + get_func_header_from_def(func_def_ast) + ';'
             contents.append(content)
         contents.insert(0, '\n'.join(includes))
-        with open(os.path.join(output, func_name, f'{func_name}.c'), 'w') as f:
+        with open(os.path.join(output, dir_name, f'{func_name}.c'), 'w') as f:
             f.write('\n\n'.join(contents))
 
 if __name__ == '__main__':
