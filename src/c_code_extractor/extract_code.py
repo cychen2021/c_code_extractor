@@ -13,7 +13,7 @@ class CodeLocation:
         self.end_point = end_point
         
 class MergeItem:
-    def __init__(self, kind: Literal['location', 'include', 'func'], item: CodeLocation | str) -> None:
+    def __init__(self, kind: Literal['location', 'include', 'func', 'macro'], item: CodeLocation | str | tuple[str, str]) -> None:
         self.kind = kind
         self.item = item
         match kind:
@@ -21,6 +21,10 @@ class MergeItem:
                 assert isinstance(item, CodeLocation)
             case 'include':
                 assert isinstance(item, str)
+            case 'macro':
+                assert isinstance(item, tuple)
+                assert isinstance(item[0], str)
+                assert isinstance(item[1], str)
 class Slice:
     def __init__(self, function_name: str, to_merge: Sequence[MergeItem]):
         self.function_name = function_name
@@ -75,6 +79,8 @@ def main(src, output, function_depends_file):
             end_point = Point(code_item['end_point'])
             to_merge.append((order, MergeItem('func', CodeLocation(code_item['file'], start_point, end_point))))
         to_merge.sort(key=lambda x: x[0], reverse=True)
+        for macro in item['macros']:
+            to_merge.insert(0, (-1, MergeItem('macro', tuple(macro))))
         slice_ = Slice(func_name, [x[1] for x in to_merge])
         
         if func_name in func_name_repeat:
@@ -94,12 +100,19 @@ def main(src, output, function_depends_file):
                 case 'include':
                     assert isinstance(item.item, str)
                     includes.add(f'#include "{item.item}"')
-                    continue
+                case 'macro':
+                    assert isinstance(item.item, tuple)
+                    original, replacement = item.item
+                    content = f'#define {original} {replacement}'
                 case 'func':
                     assert isinstance(item.item, CodeLocation)
                     func_def_ast = get_ast_exact_match(item.item.file, item.item.start_point, item.item.end_point)
                     assert func_def_ast is not None, f'{item.item.file} {item.item.start_point} {item.item.end_point}'
-                    content = 'extern ' + get_func_header_from_def(func_def_ast) + ';'
+                    with open(item.item.file, 'r') as f:
+                        file_content = f.read()
+                    header = get_func_header_from_def(func_def_ast, file_content)
+                    header = header.replace('static ', '') # A funciton cannot be both static and extern
+                    content = 'extern ' + header + ';'
             contents.append(content)
         contents.insert(0, '\n'.join(includes))
         with open(os.path.join(output, dir_name, f'{func_name}.c'), 'w') as f:

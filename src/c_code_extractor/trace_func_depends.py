@@ -215,8 +215,21 @@ def expand_macro_ultimate(clangd: ClangD, file: str) -> list[str]:
 
 DEBUG = False
 
-def trace(clangd: ClangD, file: str, start_point: Point, end_point: Point, func_def: bool = False) -> tuple[list[CodeItem], list[str]]:
+manually_resolved: dict[str, CodeItem | str] = {}
+
+def manually_resolve(name: str) -> CodeItem | None | tuple[CodeItem, tuple[str, str]] | tuple[str, str]:
+    r = manually_resolved.get(name, None)
+    if r is None or isinstance(r, CodeItem):
+        return r
+    if r not in manually_resolved:
+        return (name, r)
+    substitute = manually_resolved[r]
+    assert isinstance(substitute, CodeItem)
+    return substitute, (name, r)
+
+def trace(clangd: ClangD, file: str, start_point: Point, end_point: Point, func_def: bool = False) -> tuple[list[CodeItem], list[str], list[tuple[str, str]]]:
     error_messages = []
+
     with open(file, 'r') as f:
         content = f.read()
     try:
@@ -227,16 +240,39 @@ def trace(clangd: ClangD, file: str, start_point: Point, end_point: Point, func_
     except:
         print(f'Error for {file=}, {start_point=}, {end_point=}')
         raise
+
+    macros = set()
+    
     identifiers: list[tuple[str, Point, Point]] = tokens
-    result = []
+    result = set()
     for identifier in identifiers:
         if identifier[0] in {'int', 'char', 'float', 'double', 'void', 'long', 'short', 'signed', 'unsigned'}:
             continue
         match identifier[0]:
             case 'size_t':
                 code_item = CodeItem('include_file', 'stddef.h')
-                result.append(code_item)
+                result.add(code_item)
                 continue
+            case _:
+                try_resolve = manually_resolve(identifier[0])
+                if isinstance(try_resolve, CodeItem):
+                    result.add(try_resolve)
+                    continue
+                if isinstance(try_resolve, tuple):
+                    if isinstance(try_resolve[0], CodeItem):
+                        substitute, (name, substitute_name) = try_resolve
+                        assert isinstance(substitute, CodeItem)
+                        assert isinstance(name, str)
+                        assert isinstance(substitute_name, str)
+                        result.add(substitute)
+                        macros.add((name, substitute_name))
+                        continue
+                    else:
+                        name, substitute_name = try_resolve
+                        assert isinstance(name, str)
+                        assert isinstance(substitute_name, str)
+                        macros.add((name, substitute_name))
+                        continue
         start_point, end_point = identifier[1], identifier[2]
         defs = clangd.get_definition(file, start_point[0], start_point[1])
         if not defs:
@@ -251,7 +287,7 @@ def trace(clangd: ClangD, file: str, start_point: Point, end_point: Point, func_
         def_file_dir = os.path.abspath(os.path.dirname(def_file))
         if not def_file_dir.startswith(PROJECT_ROOT):
             code_item = CodeItem('include_file', def_file)
-            result.append(code_item)
+            result.add(code_item)
             continue
 
         ref_start_point = (def_['range']['start']['line'], def_['range']['start']['character'])
@@ -264,8 +300,8 @@ def trace(clangd: ClangD, file: str, start_point: Point, end_point: Point, func_
         if code_item.kind == 'macrodef':
             warning = f'Code item is a macro definition {code_item}, {file=}, {start_point=}, {end_point=}'
             error_messages.append(warning)
-        result.append(code_item)
-    return result, error_messages
+        result.add(code_item)
+    return list(result), error_messages, list(macros)
 
 class CodeItemWithOrder:
     def __init__(self, code_item: CodeItem, order: int):
@@ -280,9 +316,9 @@ class CodeItemWithOrder:
     def __hash__(self) -> int:
         return hash(self.code_item)
     
-    def toJson(self) -> dict:
+    def to_json(self) -> dict:
         return {
-            'code_item': self.code_item.toJson(),
+            'code_item': self.code_item.to_json(),
             'order': self.order
         }
 
@@ -302,13 +338,16 @@ def _topo_sort(parents: dict[CodeItem, list[CodeItem]], all_items: list[CodeItem
         dfs(item, visited, result)
     return result
 
-def trace_func(clangd: ClangD, file: str, func_name: str, start_point: Point) -> tuple[list[CodeItemWithOrder], list[CodeItemWithOrder], list[CodeItemWithOrder], list[str]]:
+def trace_func(clangd: ClangD, file: str, func_name: str, start_point: Point) -> tuple[list[CodeItemWithOrder], list[CodeItemWithOrder], list[CodeItemWithOrder], list[tuple[str, str]], list[str]]:
     ast = aa.get_ast_of_func_exact_match(file, start_point, func_name)
     assert ast is not None
     
     func_collect = set()
     other_collect = set()
     include_collect = set()
+    
+    macro_collect: set[tuple[str, str]] = set()
+    
     warnings = set()
     
     parents = {}
@@ -326,7 +365,8 @@ def trace_func(clangd: ClangD, file: str, func_name: str, start_point: Point) ->
         parent = parents.pop(current, None)
         if parent is not None:
             parents[current] = parent
-        code_items, messages = trace(clangd, current.file, current.start_point, current.end_point, func_def=current.kind == 'funcdef')
+        code_items, messages, macros = trace(clangd, current.file, current.start_point, current.end_point, func_def=current.kind == 'funcdef')
+        macro_collect.update(macros)
         for message in messages:
             warnings.add(message)
             
@@ -364,7 +404,7 @@ def trace_func(clangd: ClangD, file: str, func_name: str, start_point: Point) ->
     func_collect_with_order = [CodeItemWithOrder(item, indices[item]) for item in func_collect_list]
     include_collect_with_order = [CodeItemWithOrder(item, indices[item]) for item in include_collect_list]
     other_collect_with_order = [CodeItemWithOrder(item, indices[item]) for item in other_collect_list]
-    return func_collect_with_order, include_collect_with_order, other_collect_with_order, list(warnings)
+    return func_collect_with_order, include_collect_with_order, other_collect_with_order, list(macro_collect), list(warnings)
 
 import click
 import json
@@ -380,8 +420,17 @@ BATCH_SIZE = 100
 @click.option('--start-batch', '-s', type=int, default=-1, help='Start batch')
 @click.option('--end-batch', '-e', type=int, default=-1, help='End batch')
 @click.option('--batch-size', '-b', type=int, default=BATCH_SIZE, help='Batch size')
-def main(src, func_list, output, start_batch, end_batch, batch_size):
+@click.option('manually_resolve_file', '--manually-resolved', '-m', type=click.Path(exists=True, dir_okay=False, file_okay=True), help='Manually resolved items', default=None)
+def main(src, func_list, output, start_batch, end_batch, batch_size, manually_resolve_file):
     all_func_list = json.load(open(func_list, 'r'))
+    
+    if manually_resolve_file is not None:
+        with open(manually_resolve_file, 'r') as f:
+            custom_manually_resolved_json = json.load(f)
+            custom_manually_resolved = {
+                k: CodeItem.from_json(v, file_relative=src) if v['kind'] != 'replace' else v['to']
+                for k, v in custom_manually_resolved_json.items()}
+            manually_resolved.update(custom_manually_resolved)
 
     batch_num = len(all_func_list) // batch_size
     if start_batch == -1 or end_batch == -1:
@@ -407,15 +456,20 @@ def main(src, func_list, output, start_batch, end_batch, batch_size):
                     file = os.path.join(src, func['file'])
                     start_point = Point(func['start_point'])
                     func_name = func['name']
-                    func_depends, include_depends, other_depends, warnings = trace_func(clangd, file, func_name, start_point)
+                    func_depends, include_depends, other_depends, macros, warnings = trace_func(clangd, file, func_name, start_point)
                     item = {
                         'func': func,
-                        'func_depends': [f.toJson() for f in func_depends],
-                        'other_depends': [f.toJson() for f in other_depends],
-                        'include_depends': [f.toJson() for f in include_depends],
+                        'func_depends': [f.to_json() for f in func_depends],
+                        'other_depends': [f.to_json() for f in other_depends],
+                        'include_depends': [f.to_json() for f in include_depends],
+                        'macros': macros,
                         'warnings': warnings
                     }
-                    f.write(json.dumps(item) + '\n')
+                    try:
+                        f.write(json.dumps(item) + '\n')
+                    except:
+                        print(f'Error for {file=}, {func_name=}, {item=}')
+                        raise
                     f.flush()
                     pbar.update(1)
 

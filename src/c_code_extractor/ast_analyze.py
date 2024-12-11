@@ -163,17 +163,18 @@ def get_ast_of_func(file_path: str, start_point: Point, end_point: Point) -> Nod
     assert len(nl) == 1
     return nl[0]
 
-def get_func_header_from_def(ast: Node) -> str:
+def get_func_header_from_def(ast: Node, content: str) -> str:
     query = C_LANG.query(
-        r'(function_definition type: (_) @ty declarator: (_) @decl)'
+        r'(function_definition declarator: (_) @decl) @func'
     )
     matches = query.matches(ast)
     assert len(matches) == 1
-    ty = matches[0][1]['ty']
+    func = matches[0][1]['func']
     decl = matches[0][1]['decl']
-    assert ty[0].text is not None
-    assert decl[0].text is not None
-    return f'{ty[0].text.decode()} {decl[0].text.decode()}'
+    line_sizes = [len(line) + 1 for line in content.split('\n')]
+    start = line_column_to_offset(func[0].start_point.row, func[0].start_point.column, line_sizes)
+    end = line_column_to_offset(decl[0].end_point.row, decl[0].end_point.column, line_sizes)
+    return content[start:end]
 
 def get_code_item(file_path: str, start_point: Point, end_point: Point) -> CodeItem | None:
     parser = Parser(C_LANG)

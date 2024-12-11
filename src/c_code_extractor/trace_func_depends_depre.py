@@ -100,7 +100,7 @@ class CodeItemWithOrder:
     
     def toJson(self) -> dict:
         return {
-            'code_item': self.code_item.toJson(),
+            'code_item': self.code_item.to_json(),
             'order': self.order
         }
         
