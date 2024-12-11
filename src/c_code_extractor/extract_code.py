@@ -93,6 +93,7 @@ def main(src, output, function_depends_file):
         includes = set()
         contents = []
         for item in slice_.to_merge:
+            content = ''
             match item.kind:
                 case 'location':
                     assert isinstance(item.item, CodeLocation)
@@ -100,6 +101,7 @@ def main(src, output, function_depends_file):
                 case 'include':
                     assert isinstance(item.item, str)
                     includes.add(f'#include "{item.item}"')
+                    continue
                 case 'macro':
                     assert isinstance(item.item, tuple)
                     original, replacement = item.item
