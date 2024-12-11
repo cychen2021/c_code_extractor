@@ -1,0 +1,49 @@
+{
+    "POOL_ctx_s": {
+        "name": "POOL_ctx_s",
+        "kind": "typedef",
+        "file": "lib/common/pool.c",
+        "start_point": [33, 0],
+        "end_point": [59, 1]
+    },
+    "ZSTD_allocFunction": {
+        "name": "ZSTD_allocFunction",
+        "kind": "typedef",
+        "file": "lib/zstd.h",
+        "start_point": [1791, 0],
+        "end_point": [1791, 64]
+    },
+    "ZSTD_freeFunction": {
+        "name": "ZSTD_freeFunction",
+        "kind": "typedef",
+        "file": "lib/zstd.h",
+        "start_point": [1792, 0],
+        "end_point": [1792, 65]
+    },
+    "pthread_t": {
+        "kind": "include_file",
+        "file": "*pthread.h"
+    },
+    "ZSTD_pthread_t": {
+        "kind": "replace",
+        "to": "pthread_t"
+    },
+    "MEM_STATIC": {
+        "kind": "replace",
+        "to": ""
+    },
+    "POOL_job": {
+        "name": "POOL_job",
+        "kind": "typedef",
+        "file": "lib/common/pool.c",
+        "start_point": [28, 0],
+        "end_point": [31, 11]
+    },
+    "POOL_join": {
+        "name": "POOL_join",
+        "kind": "funcdef",
+        "file": "lib/common/pool.c",
+        "start_point": [164, 0],
+        "end_point": [177, 1]
+    }
+}
