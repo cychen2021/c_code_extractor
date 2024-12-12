@@ -163,6 +163,11 @@ def get_ast_of_func(file_path: str, start_point: Point, end_point: Point) -> Nod
     assert len(nl) == 1
     return nl[0]
 
+def get_func_header(content: str, start_point: Point, end_point: Point):
+    ast = get_ast_exact_match_str(content, start_point, end_point)
+    assert ast is not None
+    return get_func_header_from_def(ast, content)
+
 def get_func_header_from_def(ast: Node, content: str) -> str:
     query = C_LANG.query(
         r'(function_definition declarator: (_) @decl) @func'

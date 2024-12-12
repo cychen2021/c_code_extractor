@@ -3,7 +3,8 @@ import json
 import os
 from ast_analyze import Point
 from typing import Sequence, Literal
-from ast_analyze import get_ast_exact_match, get_func_header_from_def
+from ast_analyze import get_func_header_from_def
+from trace_func_depends import contain_leak, memory_container
 from tqdm import tqdm
 
 class CodeLocation:
@@ -108,11 +109,9 @@ def main(src, output, function_depends_file):
                     content = f'#define {original} {replacement}'
                 case 'func':
                     assert isinstance(item.item, CodeLocation)
-                    func_def_ast = get_ast_exact_match(item.item.file, item.item.start_point, item.item.end_point)
-                    assert func_def_ast is not None, f'{item.item.file} {item.item.start_point} {item.item.end_point}'
                     with open(item.item.file, 'r') as f:
                         file_content = f.read()
-                    header = get_func_header_from_def(func_def_ast, file_content)
+                    header = contain_leak('get_func_header', file_content, item.item.start_point, item.item.end_point)
                     header = header.replace('static ', '') # A funciton cannot be both static and extern
                     content = 'extern ' + header + ';'
             contents.append(content)

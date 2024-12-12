@@ -39,6 +39,10 @@ def contain_leak(function_name: str, content_or_file: str, start_point: Point | 
             assert start_point is None
             assert end_point is None
             f = memory_container.submit(aa.leaking_wrapper_ultimate, 'collect_type_and_identifiers', content_or_file)
+        case 'get_func_header':
+            assert start_point is not None
+            assert end_point is not None
+            f = memory_container.submit(aa.get_func_header, content_or_file, start_point, end_point)
         case _:
             assert start_point is not None
             match end_point:
